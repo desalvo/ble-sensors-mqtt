@@ -24,3 +24,9 @@ Il server HTTP Prometheus fornisce `/healthz` e `/readyz`. La readiness è falsa
 Una release candidate non è approvata finché `scripts/release-check.sh` non termina con successo in un ambiente con accesso Internet e set completo `.[all,dev,release]`. Il gate esegue compilazione, Ruff, pytest/coverage, Bandit, `pip-audit`, generazione manuali, build wheel/sdist, `twine check`, SBOM CycloneDX e validazione dei contenuti degli artefatti. La CI esegue la suite runtime su Python 3.11, 3.12 e 3.13.
 
 La release deve includere wheel, sdist, SBOM, checksum, archivio sorgente del progetto e manuali italiano/inglese separati.
+
+### GitHub Release automatica
+
+Il workflow GitHub Actions può essere avviato anche manualmente tramite `workflow_dispatch`. Push normali e pull request eseguono soltanto la validazione. Il push di un tag `v*` esegue la stessa matrice di test e il gate di build e, soltanto se tutti i job prerequisiti terminano con successo, avvia un job di release con permesso `contents: write` limitato al repository. Il job verifica che `vX.Y.Z` corrisponda sia a `VERSION` sia a `[project].version` in `pyproject.toml`, scarica gli artefatti generati dal job di build, crea un `SHA256SUMS.txt` consolidato e crea o aggiorna la GitHub Release usando il comando `gh` e il `GITHUB_TOKEN` fornito da GitHub Actions.
+
+Non sostituire artefatti CI falliti con file costruiti manualmente. Gli asset pubblicati devono provenire dal commit taggato che ha superato la CI. Il rerun di un workflow di tag parzialmente completato è sicuro: gli asset esistenti vengono sostituiti con `--clobber`.

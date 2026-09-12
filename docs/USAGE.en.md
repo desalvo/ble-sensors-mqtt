@@ -197,3 +197,5 @@ scripts/release-check.sh
 ```
 
 The gate requires lint, tests/coverage, Bandit, dependency audit, EN/IT PDF generation, wheel and sdist build, `twine check`, CycloneDX SBOM generation, and release package verification. CI repeats runtime tests on Python 3.11, 3.12 and 3.13.
+
+For GitHub publication, push the source commit first and then push a matching `vX.Y.Z` tag. The tag workflow runs all gates, builds deterministic release assets, creates consolidated SHA-256 checksums, and publishes the GitHub Release automatically only after the test and build jobs succeed. The release job checks that the tag version matches `VERSION` and `pyproject.toml`.

@@ -4,6 +4,7 @@
 
 ## 1.0.0 - 2026-09-12
 
+- GitHub Actions pubblica ora automaticamente le release taggate `v*` solo dopo il superamento di tutti i gate test/build, con validazione tag/versione, asset costruiti dalla CI, checksum SHA-256 consolidati e aggiornamento idempotente degli asset.
 - Release irrobustita per produzione con regole fail-closed sull'esposizione di rete.
 - MQTT attende CONNACK e conferma delle publish, usa backoff di riconnessione e rifiuta connessioni remote/non cifrate o con credenziali/non cifrate salvo consenso esplicito.
 - I topic MQTT retained dei sensori vengono rimossi solo dopo un numero configurabile di cicli mancanti consecutivi (`--stale-cycles`), evitando di reagire a una singola scansione BLE persa.
