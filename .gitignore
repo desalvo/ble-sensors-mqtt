@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+
+# Generated release archives
+ble-sensors-mqtt-v*.zip
+ble-sensors-mqtt-v*.zip.sha256
+ble-sensors-mqtt-v*.tar.gz
+ble-sensors-mqtt-v*.tar.gz.sha256
+release/

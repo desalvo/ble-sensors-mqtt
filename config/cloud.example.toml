@@ -1,0 +1,12 @@
+[cloud.tuya]
+enabled = false
+region = "eu"
+api_key_file = "/etc/ble-sensors-mqtt/tuya-api-key"
+api_secret_file = "/etc/ble-sensors-mqtt/tuya-api-secret"
+api_device_id = "ENTER_DEVICE_ID"
+# device_ids = ["SENSOR_ID_1", "SENSOR_ID_2"]
+
+# For encrypted advertisements, create a file with the hexadecimal key and chmod 600.
+# [ble_keys."AA:BB:CC:DD:EE:FF"]
+# plugin = "bthome" # or "xiaomi"
+# bindkey_file = "/etc/ble-sensors-mqtt/sensor-aa-bb-bindkey"
