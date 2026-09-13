@@ -106,6 +106,7 @@ def cli_defaults(config: dict[str, Any]) -> dict[str, Any]:
     prometheus = section("prometheus")
     snmp = section("snmp")
     frontend = section("frontend")
+    history = section("history")
     cloud = section("cloud")
 
     scalar_map = [
@@ -151,11 +152,13 @@ def cli_defaults(config: dict[str, Any]) -> dict[str, Any]:
         (frontend, "tls_cert", "frontend_tls_cert"),
         (frontend, "tls_key", "frontend_tls_key"),
         (frontend, "allow_external", "allow_external_frontend"),
+        (history, "retention_days", "history_retention_days"),
+        (history, "path", "history_path"),
         (cloud, "config_file", "cloud_config"),
     ]
     path_dests = {
         "state_file", "mqtt_password_file", "mqtt_ca_file", "mqtt_cache_path",
-        "snmp_community_file", "frontend_data_dir", "frontend_tls_cert", "frontend_tls_key", "cloud_config",
+        "snmp_community_file", "frontend_data_dir", "frontend_tls_cert", "frontend_tls_key", "history_path", "cloud_config",
     }
     for source, key, dest in scalar_map:
         if key not in source:
@@ -285,6 +288,7 @@ def default_config() -> dict[str, Any]:
             "base_oid": "1.3.6.1.4.1.32473.1.1",
             "allow_external": False,
         },
+        "history": {"retention_days": 30, "path": ""},
         "frontend": {
             "enabled": False,
             "host": "127.0.0.1",
@@ -365,6 +369,10 @@ def config_from_namespace(args: Any) -> dict[str, Any]:
             "community_file": text_path(args.snmp_community_file),
             "base_oid": args.snmp_base_oid,
             "allow_external": args.allow_external_snmp,
+        },
+        "history": {
+            "retention_days": getattr(args, "history_retention_days", 30),
+            "path": text_path(getattr(args, "history_path", None)),
         },
         "frontend": {
             "enabled": getattr(args, "frontend", False),

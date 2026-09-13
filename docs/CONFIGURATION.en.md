@@ -49,3 +49,7 @@ ble-sensors-mqtt --config /etc/ble-sensors-mqtt/config.toml --poll-interval 10
 ```
 
 uses the stored configuration but changes the polling interval only for that process.
+
+## History
+
+`[history]` controls persistent dashboard history. `retention_days` defaults to `30` and is applied live from the web Configuration page. `path` selects the SQLite file and requires a service restart when changed. Equivalent CLI options are `--history-retention-days` and `--history-path`.

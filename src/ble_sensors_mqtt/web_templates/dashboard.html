@@ -90,11 +90,22 @@ function normalizeKey(value) {
 }
 function scalarEntries(sensor) {
   const data = sensor && sensor.data && typeof sensor.data === 'object' ? sensor.data : {};
-  return Object.entries(data).filter(([key,value]) => key !== 'units' && value !== null && typeof value !== 'object');
+  const result = [];
+  const walk = (value, prefix='') => {
+    if (result.length >= 256) return;
+    if (Array.isArray(value)) { value.slice(0,100).forEach((child,index) => walk(child, prefix ? `${prefix}.${index}` : String(index))); return; }
+    if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([key,child]) => { if (key !== 'units') walk(child, prefix ? `${prefix}.${key}` : key); });
+      return;
+    }
+    if (value !== null && ['string','boolean','number'].includes(typeof value)) result.push([prefix,value]);
+  };
+  walk(data);
+  return result;
 }
 function findValue(sensor, names) {
   const wanted = new Set(names.map(normalizeKey));
-  for (const [key,value] of scalarEntries(sensor)) if (wanted.has(normalizeKey(key))) return {key,value};
+  for (const [key,value] of scalarEntries(sensor)) { const normalized=normalizeKey(key); const leaf=normalizeKey(String(key).split('.').pop()); if (wanted.has(normalized) || wanted.has(leaf)) return {key,value}; }
   return null;
 }
 function numberValue(value) {
@@ -116,7 +127,8 @@ function formatNumber(value, digits=1) {
 }
 function unitFor(sensor, key, fallback='') {
   const units = sensor?.data?.units;
-  if (units && typeof units === 'object' && units[key]) return String(units[key]);
+  const leaf = String(key).split('.').pop();
+  if (units && typeof units === 'object' && (units[key] || units[leaf])) return String(units[key] || units[leaf]);
   return fallback;
 }
 function metric(sensor, kind) {
@@ -149,7 +161,7 @@ function sensorCard(address, sensor) {
   return `<article class="sensor-card rich-sensor-card" data-search="${esc(search)}" data-status="${status}">
     <div class="sensor-card-head">
       <div class="sensor-ident"><div class="device-orb">◉</div><div><h3>${esc(name)}</h3><small>${esc(sensor.manufacturer || 'Unknown manufacturer')} · ${esc(sensor.model || sensor.protocol || 'Unknown model')}</small></div></div>
-      <span class="status-chip ${status === 'live' ? 'online' : 'degraded'}"><span class="status-dot"></span>${status === 'live' ? 'Live' : 'Stale'}</span>
+      <div class="sensor-card-actions"><a class="mini-action" href="/history?sensor=${encodeURIComponent(address)}">History</a><span class="status-chip ${status === 'live' ? 'online' : 'degraded'}"><span class="status-dot"></span>${status === 'live' ? 'Live' : 'Stale'}</span></div>
     </div>
     <div class="primary-readings">${metricsHtml}</div>
     <div class="secondary-readings">${extraHtml}</div>

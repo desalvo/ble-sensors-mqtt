@@ -80,3 +80,11 @@ Default frontend state is stored under:
 - macOS: `~/Library/Application Support/ble-sensors-mqtt/frontend`.
 
 It contains the authentication SQLite database, session secret, runtime configuration override and temporary/export data. Protect this directory as sensitive application state.
+
+## Sensor history
+
+When the web frontend is enabled, ble-sensors-mqtt stores each exported sensor snapshot in a persistent SQLite history database. The default retention is 30 days. Configure it from the web Configuration page under **History**, or with `--history-retention-days DAYS`. Use `--history-path PATH` to override the SQLite location.
+
+The History page supports one or more sensors, date-range filtering, simultaneous chart series, and a tabular view. By default the table suppresses consecutive rows when both the complete sensor values and the `stale` flag are unchanged; enable **Show consecutive duplicates** to see every stored sample. Administrators can delete the full history of selected sensors or only the selected date interval. Readers have read-only access.
+
+The history database is included in encrypted full backup/export and restored through the same web Backup / Restore workflow.

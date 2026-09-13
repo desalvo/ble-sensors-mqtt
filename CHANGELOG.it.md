@@ -57,3 +57,8 @@
 - Prima release: gateway multi-sensore plugin-based, polling continuo e pubblicazione MQTT.
 - TLS, autenticazione tramite password file, filtri MAC e unità systemd irrobustita.
 - Test, lint, analisi statica e audit dipendenze in CI.
+
+- La dashboard ora risolve anche valori annidati e mette in evidenza le ultime letture comuni per dispositivo.
+- Aggiunto storico persistente SQLite con retention predefinita di 30 giorni, grafici multi-sensore, tabelle deduplicate, cancellazione per intervallo/totale, configurazione da impostazioni/CLI e integrazione nel backup/ripristino cifrato.
+
+- Corretto il polling BLE: più advertisement dello stesso dispositivo nella stessa finestra di scansione vengono decodificati in ordine e viene esportata l'ultima lettura valida, evitando che temperatura/altri valori sembrino bloccati tra i cicli.

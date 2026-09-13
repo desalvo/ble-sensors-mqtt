@@ -275,6 +275,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--snmp-community-file", type=Path)
     result.add_argument("--snmp-base-oid", default="1.3.6.1.4.1.32473.1.1")
     result.add_argument("--allow-external-snmp", action="store_true", help="allow plaintext SNMPv2c on a non-loopback address")
+    result.add_argument("--history-retention-days", type=int, default=30, metavar="DAYS", help="retain sensor history for DAYS (default: 30)")
+    result.add_argument("--history-path", type=Path, help="SQLite sensor history path; defaults under the frontend data directory")
     result.add_argument("--frontend", action="store_true", help="enable the authenticated web frontend")
     result.add_argument("--frontend-host", type=bind_address, default="127.0.0.1", metavar="IP")
     result.add_argument("--frontend-port", type=mqtt_port, default=8080)
@@ -597,8 +599,16 @@ def read_secret(path: Path, description: str) -> str:
         os.close(fd)
 
 
+def _frontend_history_path(args: argparse.Namespace) -> Path:
+    from .config import default_frontend_data_dir
+    base = Path(args.frontend_data_dir) if getattr(args, "frontend_data_dir", None) else default_frontend_data_dir()
+    return base / "history.sqlite3"
+
+
 def validate_runtime_security(args: argparse.Namespace) -> None:
     """Validate fail-closed production transport and bind policies."""
+    if args.history_retention_days < 1 or args.history_retention_days > 36500:
+        raise ValueError("--history-retention-days must be between 1 and 36500")
     if args.stale_cycles < 1 or args.stale_cycles > 1000:
         raise ValueError("--stale-cycles must be between 1 and 1000")
     if not args.mqtt_tls and not args.allow_insecure_mqtt:
@@ -734,6 +744,11 @@ async def bridge(args: argparse.Namespace) -> int:
     prometheus_server = None
     snmp_transport = None
     frontend_server = None
+    history_store = None
+    if args.frontend:
+        from .history import HistoryStore
+        history_path = args.history_path or (_frontend_history_path(args))
+        history_store = HistoryStore(history_path, args.history_retention_days)
     if args.prometheus:
         from .prometheus import start as start_prometheus
 
@@ -751,7 +766,7 @@ async def bridge(args: argparse.Namespace) -> int:
     if args.frontend:
         from .frontend import start_frontend
         config_path = args.config or default_config_path()
-        frontend_server = start_frontend(store, args, config_path, cache)
+        frontend_server = start_frontend(store, args, config_path, cache, history_store)
         scheme = "https" if args.frontend_tls_cert else "http"
         LOG.info("frontend available at %s://%s:%d", scheme, args.frontend_host, args.frontend_port)
 
@@ -805,6 +820,8 @@ async def bridge(args: argparse.Namespace) -> int:
                 }
 
                 store.replace(exported)
+                if history_store is not None:
+                    history_store.append_snapshot(exported)
                 current_topics: set[str] = set()
                 current_discovery_topics: set[str] = set()
                 for address, payload in sorted(exported.items()):
@@ -880,6 +897,8 @@ async def bridge(args: argparse.Namespace) -> int:
             snmp_transport.close()
         if frontend_server:
             frontend_server.shutdown()
+        if history_store is not None:
+            history_store.close()
         if connected.is_set():
             with contextlib.suppress(OSError, TimeoutError, RuntimeError):
                 publish_confirmed(f"{prefix}/bridge/status", b"offline", 1, True)

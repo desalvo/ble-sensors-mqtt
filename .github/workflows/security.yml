@@ -152,6 +152,24 @@ jobs:
       - name: Verify tag matches VERSION
         if: startsWith(github.ref, 'refs/tags/v')
         run: python scripts/verify-tag-version.py
+      - name: Clean native build workspace
+        shell: python
+        run: |
+          import shutil
+          from pathlib import Path
+
+          for name in ("build", "dist", "native-dist"):
+              path = Path(name)
+              if path.exists():
+                  if path.is_dir():
+                      shutil.rmtree(path)
+                  else:
+                      path.unlink()
+          for path in Path("src").glob("*.egg-info"):
+              if path.is_dir():
+                  shutil.rmtree(path)
+              elif path.exists():
+                  path.unlink()
       - name: Install native builder and core runtime
         run: python -m pip install --upgrade pip "setuptools>=83" wheel ".[native]"
       - name: Install Inno Setup on Windows

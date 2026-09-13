@@ -174,6 +174,48 @@ def test_sync_plugin_decode_is_timeout_bounded(monkeypatch):
     assert elapsed < 0.18
 
 
+
+def test_scanner_keeps_latest_decoded_reading(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import ble_sensors_mqtt.scanner as scanner_module
+    from ble_sensors_mqtt.plugin_api import SensorReading
+
+    class FakeScanner:
+        def __init__(self, detection_callback):
+            self.callback = detection_callback
+
+        async def start(self):
+            device = SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
+            self.callback(device, SimpleNamespace(temperature=20.0))
+            self.callback(device, SimpleNamespace(temperature=21.5))
+
+        async def stop(self):
+            return None
+
+    class TemperaturePlugin:
+        name = "temperature"
+
+        def decode(self, device, advertisement):
+            return [
+                SensorReading(
+                    address=device.address,
+                    name="Room",
+                    manufacturer="Test",
+                    model="T1",
+                    protocol="BLE",
+                    data={"temperature": advertisement.temperature},
+                )
+            ]
+
+    monkeypatch.setitem(
+        __import__("sys").modules, "bleak", SimpleNamespace(BleakScanner=FakeScanner)
+    )
+    readings = asyncio.run(scanner_module.scan(0.001, [TemperaturePlugin()]))
+    assert len(readings) == 1
+    assert readings[0].data["temperature"] == 21.5
+
 def test_stale_reuse_cli_and_payload_behavior():
     from ble_sensors_mqtt.cli import apply_stale_fallback
 

@@ -37,10 +37,15 @@ async def scan(
 
     from bleak import BleakScanner
 
-    advertisements: dict[str, tuple[Any, Any]] = {}
+    advertisements: dict[str, list[tuple[Any, Any]]] = {}
+    max_frames_per_device = 64
 
     def detected(device: Any, advertisement: Any) -> None:
-        advertisements[device.address.upper()] = (device, advertisement)
+        key = device.address.upper()
+        frames = advertisements.setdefault(key, [])
+        frames.append((device, advertisement))
+        if len(frames) > max_frames_per_device:
+            del frames[:-max_frames_per_device]
 
     scanner_kwargs: dict[str, Any] = {}
     if adapter:
@@ -55,14 +60,20 @@ async def scan(
         await scanner.stop()
 
     readings: dict[str, SensorReading] = {}
-    for device, advertisement in advertisements.values():
-        for plugin in plugins:
-            try:
-                decoded = await _decode_with_timeout(plugin, device, advertisement, decode_timeout)
-                for reading in decoded:
-                    readings.setdefault(reading.address.upper(), reading)
-            except TimeoutError:
-                LOG.warning("plugin %s timed out decoding %s", plugin.name, device.address)
-            except Exception as exc:  # noqa: BLE001 - isolate third-party plugins
-                LOG.debug("plugin %s did not decode %s: %s", plugin.name, device.address, exc)
+    for frames in advertisements.values():
+        for device, advertisement in frames:
+            for plugin in plugins:
+                try:
+                    decoded = await _decode_with_timeout(
+                        plugin, device, advertisement, decode_timeout
+                    )
+                    for reading in decoded:
+                        # A sensor may advertise several frames during one scan window.
+                        # Keep the most recently decoded value instead of freezing the
+                        # first successful frame for the whole cycle.
+                        readings[reading.address.upper()] = reading
+                except TimeoutError:
+                    LOG.warning("plugin %s timed out decoding %s", plugin.name, device.address)
+                except Exception as exc:  # noqa: BLE001 - isolate third-party plugins
+                    LOG.debug("plugin %s did not decode %s: %s", plugin.name, device.address, exc)
     return list(readings.values())

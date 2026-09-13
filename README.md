@@ -8,7 +8,7 @@ A plugin-based multi-sensor gateway for Raspberry Pi Zero W and newer boards. It
 Bluetooth LE data and, optionally, Tuya Cloud data, then publishes one normalized snapshot to
 MQTT, Prometheus, and SNMP. Intended repository: `desalvo/ble-sensors-mqtt`.
 
-**Version:** 1.0.0 · **Build:** see `BUILD` · **Author:** Alessandro De Salvo
+**Version:** 1.0.0 · **Build:** see `BUILD_INFO` · **Author:** Alessandro De Salvo
 <braket71@gmail.com> · **License:** EUPL-1.2
 
 ## Features
@@ -396,7 +396,7 @@ and SNMPv2c do not provide end-to-end authenticity or confidentiality.
 - English manual: [`docs/USAGE.en.md`](docs/USAGE.en.md) and `docs/ble-sensors-mqtt-manual-v1.0.0-en.pdf`
 - Manuale italiano: [`docs/USAGE.it.md`](docs/USAGE.it.md) and `docs/ble-sensors-mqtt-manual-v1.0.0-it.pdf`
 
-`scripts/build-package.sh` updates `BUILD` in UTC as `YYYYMMDD-HHMM`, then creates ZIP,
+`scripts/build-package.sh` updates `BUILD_INFO` in UTC as `YYYYMMDD-HHMM`, then creates ZIP,
 TAR.GZ, and SHA-256 checksums. Licensed under EUPL-1.2; see `LICENSE`.
 
 ## Production release policy

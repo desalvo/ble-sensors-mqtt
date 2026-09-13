@@ -85,3 +85,8 @@ client_secret_file = ""
 scopes = "openid profile email"
 username_claim = "preferred_username"
 default_role = "reader"
+
+# Persistent sensor history used by the authenticated dashboard.
+[history]
+retention_days = 30
+path = ""

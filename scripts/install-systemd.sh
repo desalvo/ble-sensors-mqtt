@@ -336,7 +336,7 @@ for item in src assets config docs systemd scripts docker kubernetes; do
   fi
 done
 for item in \
-  pyproject.toml MANIFEST.in VERSION BUILD LICENSE README.md README.it.md \
+  pyproject.toml MANIFEST.in VERSION BUILD_INFO LICENSE README.md README.it.md \
   SECURITY.en.md SECURITY.it.md CHANGELOG.en.md CHANGELOG.it.md; do
   [[ -e $src_dir/$item ]] && install -m 0644 "$src_dir/$item" "$install_root/$item"
 done

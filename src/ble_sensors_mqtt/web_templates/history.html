@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}History · ble-sensors-mqtt{% endblock %}
+{% block content %}
+<section class="history-hero panel">
+  <div><span class="eyebrow dark">SENSOR HISTORY</span><h1>Historical readings</h1><p>Compare one or more sensors as charts or detailed samples. Default retention: <b>{{ retention_days }} days</b>.</p></div>
+</section>
+
+<section class="panel history-controls">
+  <form method="get" action="{{ url_for('history_view') }}" id="history-filter-form">
+    <div class="history-filter-grid">
+      <label class="history-sensors"><span>Sensors</span><select name="sensor" multiple size="6">
+        {% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }} ({{ sensor.samples }})</option>{% endfor %}
+      </select><small>Ctrl/Cmd-click to select multiple sensors.</small></label>
+      <label><span>From</span><input type="date" name="start" value="{{ start }}"></label>
+      <label><span>To</span><input type="date" name="end" value="{{ end }}"></label>
+      <label class="toggle-line"><input type="checkbox" name="duplicates" value="1" {% if not deduplicate %}checked{% endif %}><span>Show consecutive duplicates</span></label>
+    </div>
+    <div class="form-actions"><button type="submit">Apply</button><a class="button ghost-link" href="{{ url_for('history_view') }}">Reset</a></div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-heading"><div><span class="eyebrow dark">GRAPH</span><h2>Selected sensor values</h2></div></div>
+  <div class="chart-toolbar"><label>Series <select id="series-selector" multiple size="4"></select></label><small>Select multiple series to compare sensors.</small></div>
+  <div class="history-chart-wrap"><canvas id="history-chart" width="1200" height="430"></canvas></div>
+  <div id="chart-empty" class="empty-state" hidden>No numeric or boolean series are available in the selected interval.</div>
+</section>
+
+<section class="panel">
+  <div class="section-heading"><div><span class="eyebrow dark">TABLE</span><h2>Historical samples</h2><p>{% if deduplicate %}Consecutive samples with identical values and identical stale flag are omitted.{% else %}All samples are displayed.{% endif %}</p></div><strong>{{ rows|length }} rows</strong></div>
+  <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Recorded</th><th>Sensor</th><th>Stale</th><th>Values</th></tr></thead><tbody>
+  {% for row in rows %}<tr><td>{{ row.recorded_at }}</td><td><strong>{{ row.name }}</strong><small>{{ row.sensor_id }}</small></td><td><span class="status-chip {{ 'degraded' if row.stale else 'online' }}">{{ 'Stale' if row.stale else 'Live' }}</span></td><td><div class="history-values">{% for value in row['values'] %}<span><b>{{ value.path }}</b> {{ value.value }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No historical samples in the selected interval.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+{% if current_user.role == 'admin' %}
+<section class="panel danger-panel">
+  <span class="eyebrow dark">ADMINISTRATION</span><h2>Delete history</h2><p>Delete the full history of selected sensors, or only the chosen interval. This action cannot be undone.</p>
+  <form method="post" action="{{ url_for('history_delete') }}" onsubmit="return confirm('Delete the selected historical samples? This cannot be undone.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="history-delete-grid"><label><span>Sensors</span><select name="sensor" multiple size="5" required>{% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }}</option>{% endfor %}</select></label><label><span>From (optional)</span><input type="date" name="start" value="{{ start }}"></label><label><span>To (optional)</span><input type="date" name="end" value="{{ end }}"></label></div>
+    <button class="danger" type="submit">Delete selected history</button>
+  </form>
+</section>
+{% endif %}
+
+<script>
+const historyRows = {{ rows|tojson }};
+const canvas = document.querySelector('#history-chart');
+const selector = document.querySelector('#series-selector');
+const empty = document.querySelector('#chart-empty');
+const palette = ['#4dd4ac','#63a8ff','#ffb55c','#d58cff','#ff7088','#7ed957','#ffd166','#7bdff2'];
+function numeric(v) { if (typeof v === 'boolean') return v ? 1 : 0; if (typeof v === 'number' && Number.isFinite(v)) return v; return null; }
+const series = new Map();
+historyRows.forEach(row => (row.values || []).forEach(item => { const value=numeric(item.value); if(value===null)return; const key=`${row.sensor_id} · ${item.path}`; if(!series.has(key))series.set(key,[]); series.get(key).push({t:new Date(row.recorded_at).getTime(),v:value,stale:row.stale,name:row.name}); }));
+[...series.keys()].sort().forEach((key,index) => { const option=document.createElement('option'); option.value=key; option.textContent=key; option.selected=index<Math.min(4,series.size); selector.appendChild(option); });
+function draw() {
+  const keys=[...selector.selectedOptions].map(o=>o.value); const groups=keys.map(key=>({key,points:series.get(key)||[]})).filter(x=>x.points.length); const ctx=canvas.getContext('2d'); const ratio=window.devicePixelRatio||1; const cssWidth=canvas.clientWidth||1200; const cssHeight=430; canvas.width=cssWidth*ratio; canvas.height=cssHeight*ratio; ctx.scale(ratio,ratio); ctx.clearRect(0,0,cssWidth,cssHeight);
+  if(!groups.length){empty.hidden=false;return;} empty.hidden=true; const all=groups.flatMap(g=>g.points);
+  const pad={l:62,r:22,t:28,b:68}; const w=cssWidth-pad.l-pad.r,h=cssHeight-pad.t-pad.b; let minT=Math.min(...all.map(p=>p.t)),maxT=Math.max(...all.map(p=>p.t)); let minV=Math.min(...all.map(p=>p.v)),maxV=Math.max(...all.map(p=>p.v)); if(minT===maxT){minT-=1000;maxT+=1000;} if(minV===maxV){minV-=1;maxV+=1;}
+  ctx.strokeStyle='rgba(150,170,190,.25)'; ctx.fillStyle='#8190a5'; ctx.font='12px system-ui'; for(let i=0;i<=5;i++){const y=pad.t+h*i/5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();const value=maxV-(maxV-minV)*i/5;ctx.fillText(value.toFixed(2).replace(/\.00$/,''),8,y+4);}
+  groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.strokeStyle=color;ctx.lineWidth=2.3;ctx.beginPath();group.points.forEach((p,i)=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();group.points.forEach(p=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;ctx.fillStyle=p.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();});});
+  ctx.fillStyle='#8190a5';ctx.fillText(new Date(minT).toLocaleString(),pad.l,pad.t+h+30);const endText=new Date(maxT).toLocaleString();ctx.fillText(endText,pad.l+w-ctx.measureText(endText).width,pad.t+h+30);
+  let lx=pad.l,ly=cssHeight-16;groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.fillStyle=color;ctx.fillRect(lx,ly-8,12,3);ctx.fillStyle='#526174';const label=group.key.length>34?group.key.slice(0,31)+'…':group.key;ctx.fillText(label,lx+17,ly);lx+=ctx.measureText(label).width+46;if(lx>cssWidth-260){lx=pad.l;ly-=18;}});
+}
+selector.addEventListener('change',draw); window.addEventListener('resize',draw); if(selector.options.length)draw();else empty.hidden=false;
+</script>
+{% endblock %}

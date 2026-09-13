@@ -186,7 +186,9 @@ class FrontendServer:
         self.auth.close()
 
 
-def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None = None) -> FrontendServer:
+def start_frontend(
+    store: Any, args: Any, config_path: Path, cache: Any | None = None, history: Any | None = None
+) -> FrontendServer:
     try:
         from flask import (
             Flask,
@@ -392,6 +394,81 @@ def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None =
     def api_sensors() -> Any:
         return jsonify({"sensors": store.snapshot(), "health": store.health()})
 
+    def _history_range(value: str | None, *, end: bool = False) -> str | None:
+        if not value:
+            return None
+        from datetime import UTC, datetime
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("invalid history date/time") from exc
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.astimezone(UTC)
+        if end and len(text) <= 10:
+            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return parsed.isoformat()
+
+    @app.route("/history")
+    @login_required
+    def history_view() -> Any:
+        available = history.sensors() if history is not None else []
+        selected = request.args.getlist("sensor")
+        if not selected and available:
+            selected = [str(available[0]["sensor_id"])]
+        try:
+            start = _history_range(request.args.get("start"))
+            end = _history_range(request.args.get("end"), end=True)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            start = end = None
+        deduplicate = request.args.get("duplicates") != "1"
+        rows = history.query(selected, start, end, deduplicate=deduplicate) if history is not None else []
+        return render_template(
+            "history.html",
+            available=available, selected=selected, rows=rows,
+            start=request.args.get("start", ""), end=request.args.get("end", ""),
+            deduplicate=deduplicate, retention_days=getattr(args, "history_retention_days", 30),
+        )
+
+    @app.route("/api/history")
+    @login_required
+    def api_history() -> Any:
+        if history is None:
+            return jsonify({"sensors": [], "rows": []})
+        selected = request.args.getlist("sensor")
+        try:
+            start = _history_range(request.args.get("start"))
+            end = _history_range(request.args.get("end"), end=True)
+        except ValueError as exc:
+            abort(400, str(exc))
+        deduplicate = request.args.get("duplicates") != "1"
+        return jsonify({
+            "sensors": history.sensors(),
+            "rows": history.query(selected, start, end, deduplicate=deduplicate),
+        })
+
+    @app.route("/history/delete", methods=["POST"])
+    @admin_required
+    def history_delete() -> Any:
+        if history is None:
+            abort(404)
+        selected = request.form.getlist("sensor")
+        if not selected:
+            flash("Select at least one sensor", "error")
+            return redirect(url_for("history_view"))
+        try:
+            start = _history_range(request.form.get("start"))
+            end = _history_range(request.form.get("end"), end=True)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("history_view"))
+        deleted = history.delete(selected, start, end)
+        auth.audit(current_user().username, "history_deleted", f"{deleted} samples")  # type: ignore[union-attr]
+        flash(f"Deleted {deleted} historical samples", "success")
+        return redirect(url_for("history_view"))
+
     @app.route("/settings", methods=["GET", "POST"])
     @admin_required
     def settings() -> Any:
@@ -425,6 +502,7 @@ def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None =
                 ("bluetooth", "scan_duration"): "scan_duration", ("bluetooth", "poll_interval"): "poll_interval",
                 ("bluetooth", "plugin_timeout"): "plugin_timeout", ("runtime", "reuse_stale_data"): "reuse_stale_data",
                 ("runtime", "state_file"): "state_file", ("runtime", "log_level"): "log_level",
+                ("history", "retention_days"): "history_retention_days",
                 ("mqtt", "retain"): "retain", ("mqtt", "qos"): "qos", ("mqtt", "stale_cycles"): "stale_cycles",
                 ("mqtt", "home_assistant_discovery"): "home_assistant_discovery",
                 ("mqtt", "home_assistant_discovery_prefix"): "home_assistant_discovery_prefix",
@@ -444,10 +522,13 @@ def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None =
                 args.device = [sensor_identifier(str(v)) for v in current[section].get("devices", [])]
                 args.device_name = [parse_device_name(str(v)) for v in current[section].get("device_names", [])]
                 args.sensor_name = [parse_sensor_name(str(v)) for v in current[section].get("sensor_names", [])]
+            if section == "history" and history is not None:
+                history.set_retention_days(int(current[section].get("retention_days", 30)))
+                history.purge_expired(force=True)
             if section == "runtime" and "log_level" in current[section]:
                 import logging
                 logging.getLogger().setLevel(str(current[section]["log_level"]))
-            restart_required = section in {"mqtt", "prometheus", "snmp", "frontend", "mqtt_cache"}
+            restart_required = section in {"mqtt", "prometheus", "snmp", "frontend", "mqtt_cache"} or (section == "history" and "path" in request.form)
             auth.audit(current_user().username, "configuration_changed", section)  # type: ignore[union-attr]
             flash("Configuration saved" + ("; restart required for this section" if restart_required else "; applied live"), "success")
             current = cfg()
@@ -526,8 +607,13 @@ def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None =
                     if cache is not None:
                         cache_snapshot = Path(cache_temp) / "mqtt-cache.sqlite3"
                         cache.snapshot_to(cache_snapshot)
+                    history_snapshot = None
+                    if history is not None:
+                        history_snapshot = Path(cache_temp) / "history.sqlite3"
+                        history.snapshot_to(history_snapshot)
                     files = {
                         "mqtt-cache.sqlite3": cache_snapshot,
+                        "history.sqlite3": history_snapshot,
                         "state.json": getattr(args, "state_file", None),
                         "cloud.toml": getattr(args, "cloud_config", None),
                     }
@@ -586,6 +672,9 @@ def start_frontend(store: Any, args: Any, config_path: Path, cache: Any | None =
                         imported_cache = extracted / "files/mqtt-cache.sqlite3"
                         if imported_cache.exists() and cache is not None:
                             cache.restore_from(imported_cache)
+                        imported_history = extracted / "files/history.sqlite3"
+                        if imported_history.exists() and history is not None:
+                            history.restore_from(imported_history)
                         state_destination = getattr(args, "state_file", None)
                         source_state = extracted / "files/state.json"
                         if source_state.exists() and state_destination:

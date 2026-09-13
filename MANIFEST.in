@@ -1,5 +1,5 @@
 include .dockerignore
-include VERSION BUILD LICENSE README.md README.it.md SECURITY.en.md SECURITY.it.md CHANGELOG.en.md CHANGELOG.it.md
+include VERSION BUILD_INFO LICENSE README.md README.it.md SECURITY.en.md SECURITY.it.md CHANGELOG.en.md CHANGELOG.it.md
 recursive-include assets *.png
 recursive-include config *.toml *.example
 recursive-include docs *.md *.txt *.pdf

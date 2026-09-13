@@ -57,3 +57,10 @@
 - Initial multi-sensor plugin gateway with continuous polling and MQTT publishing.
 - TLS, file-based password authentication, MAC allow-list, and hardened systemd unit.
 - Tests, linting, static analysis, and dependency auditing in CI.
+
+- Dashboard now resolves nested sensor values and highlights the latest common readings per device.
+- Added persistent SQLite sensor history with 30-day default retention, multi-sensor charts, deduplicated tables, interval/full deletion, settings/CLI controls, and encrypted backup/restore integration.
+
+- Fixed BLE polling so multiple advertisements from the same device in one scan window are decoded in order and the latest successful reading is exported, preventing temperature/other values from appearing frozen between cycles.
+
+- Fixed BLE polling so multiple advertisements from the same device in one scan window are decoded in order and the latest successful reading is exported, preventing temperature/other values from appearing frozen between cycles.

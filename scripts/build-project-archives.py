@@ -86,7 +86,7 @@ def checksum(path: Path) -> None:
 def main() -> None:
     timestamp = epoch()
     build_id = datetime.fromtimestamp(timestamp, UTC).strftime("%Y%m%d-%H%M")
-    (ROOT / "BUILD").write_text(build_id + "\n", encoding="ascii")
+    (ROOT / "BUILD_INFO").write_text(build_id + "\n", encoding="ascii")
     members = files()
     release_dir_raw = os.environ.get("RELEASE_DIR")
     release_dir = Path(release_dir_raw) if release_dir_raw else ROOT / "release"

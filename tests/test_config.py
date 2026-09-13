@@ -16,6 +16,7 @@ def test_config_toml_roundtrip(tmp_path: Path):
     assert loaded["mqtt"]["home_assistant_discovery"] is True
     assert loaded["bluetooth"]["device_names"] == ["AA:BB:CC:DD:EE:FF=Office"]
     assert "[prometheus]" in dump_config(config)
+    assert config["history"]["retention_days"] == 30
 
 
 def test_cli_overrides_config_file(tmp_path: Path):
@@ -34,6 +35,9 @@ home_assistant_discovery = true
 [mqtt_cache]
 enabled = true
 max_size = "2MiB"
+
+[history]
+retention_days = 45
 
 [prometheus]
 enabled = true
@@ -54,5 +58,6 @@ port = 9106
     assert args.home_assistant_discovery is True
     assert args.mqtt_cache_max_size == 2 * 1024 * 1024
     assert args.device_name == [("AA:BB:CC:DD:EE:FF", "Office")]
+    assert args.history_retention_days == 45
     assert args.prometheus is True
     assert args.prometheus_port == 9106

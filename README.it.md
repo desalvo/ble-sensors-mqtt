@@ -8,7 +8,7 @@ Gateway multi-sensore plugin-based per Raspberry Pi Zero W o superiore. Acquisis
 Bluetooth LE e, opzionalmente, Tuya Cloud; normalizza i dati e li pubblica su MQTT,
 Prometheus e SNMP. Repository previsto: `desalvo/ble-sensors-mqtt`.
 
-**Versione:** 1.0.0 · **Build:** file `BUILD` · **Autore:** Alessandro De Salvo
+**Versione:** 1.0.0 · **Build:** file `BUILD_INFO` · **Autore:** Alessandro De Salvo
 <braket71@gmail.com> · **Licenza:** EUPL-1.2
 
 ## Funzioni
@@ -412,7 +412,7 @@ Tutte le piattaforme possono usare `config.toml` con precedenza **CLI > file di 
 
 ## Build e licenza
 
-`scripts/build-package.sh` aggiorna `BUILD` in UTC nel formato `YYYYMMDD-HHMM` e produce ZIP,
+`scripts/build-package.sh` aggiorna `BUILD_INFO` in UTC nel formato `YYYYMMDD-HHMM` e produce ZIP,
 TAR.GZ e checksum SHA-256. Licenza EUPL-1.2: vedere `LICENSE`.
 
 Documentazione: manuale italiano in [`docs/USAGE.it.md`](docs/USAGE.it.md) e `docs/ble-sensors-mqtt-manual-v1.0.0-it.pdf`; manuale inglese in [`docs/USAGE.en.md`](docs/USAGE.en.md) e `docs/ble-sensors-mqtt-manual-v1.0.0-en.pdf`.
