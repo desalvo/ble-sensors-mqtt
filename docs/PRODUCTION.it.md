@@ -27,7 +27,7 @@ La release deve includere wheel, sdist, SBOM, checksum, archivio sorgente del pr
 
 ### GitHub Release automatica
 
-Il workflow GitHub Actions può essere avviato anche manualmente tramite `workflow_dispatch`. Le pull request e i push ordinari non di release eseguono la validazione; un push su `main` può inoltre pubblicare l'immagine Docker opzionale `latest` quando la pubblicazione Docker Hub è abilitata. Il push di un tag `v*` esegue la stessa matrice di test e il gate di build e, soltanto se tutti i job prerequisiti terminano con successo, avvia un job di release con permesso `contents: write` limitato al repository. Il job verifica che `vX.Y.Z` corrisponda sia a `VERSION` sia a `[project].version` in `pyproject.toml`, scarica gli artefatti generati dal job di build, crea un `SHA256SUMS.txt` consolidato e crea o aggiorna la GitHub Release usando il comando `gh` e il `GITHUB_TOKEN` fornito da GitHub Actions.
+Il workflow GitHub Actions può essere avviato anche manualmente tramite `workflow_dispatch`. Le pull request eseguono la validazione. Un push su `main` esegue la validazione, costruisce e carica come artifact del workflow i package nativi Windows/macOS e può inoltre pubblicare l'immagine Docker opzionale `latest` quando la pubblicazione Docker Hub è abilitata. Il push di un tag `v*` costruisce gli stessi package nativi e, soltanto se tutti i job prerequisiti terminano con successo, avvia un job di release con permesso `contents: write` limitato al repository. Il job verifica che `vX.Y.Z` corrisponda sia a `VERSION` sia a `[project].version` in `pyproject.toml`, scarica gli artefatti generati dal job di build, crea un `SHA256SUMS.txt` consolidato e crea o aggiorna la GitHub Release usando il comando `gh` e il `GITHUB_TOKEN` fornito da GitHub Actions.
 
 Non sostituire artefatti CI falliti con file costruiti manualmente. Gli asset pubblicati devono provenire dal commit taggato che ha superato la CI. Il rerun di un workflow di tag parzialmente completato è sicuro: gli asset esistenti vengono sostituiti con `--clobber`.
 
@@ -41,7 +41,7 @@ Lo spool MQTT SQLite predefinito fornisce consegna bounded at-least-once durante
 
 ## Artifact nativi Windows/macOS
 
-Ad ogni tag `vX.Y.Z`, la CI crea bundle PyInstaller nativi su `windows-2025`, `macos-26` (Apple Silicon) e `macos-26-intel`. Ogni bundle viene verificato con `--version` e `--list-plugins` prima dell'upload. Le dipendenze opzionali sensori/cloud vengono installate best-effort per piattaforma; quelle non supportate vengono omesse e risultano visibili tramite `--list-plugins`. I runner CI non dispongono di hardware Bluetooth fisico, quindi la validazione radio BLE resta un test di accettazione sull'host reale.
+Ad ogni push su `main` e ad ogni tag `vX.Y.Z`, la CI crea bundle PyInstaller nativi su `windows-2025`, `macos-26` (Apple Silicon) e `macos-26-intel`. Le build di `main` restano artifact del workflow; quelle taggate vengono inoltre raccolte nella GitHub Release. Ogni bundle viene verificato con `--version` e `--list-plugins` prima dell'upload. Le dipendenze opzionali sensori/cloud vengono installate best-effort per piattaforma; quelle non supportate vengono omesse e risultano visibili tramite `--list-plugins`. I runner CI non dispongono di hardware Bluetooth fisico, quindi la validazione radio BLE resta un test di accettazione sull'host reale.
 
 ## Controlli di produzione del frontend
 

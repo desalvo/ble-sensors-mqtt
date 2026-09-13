@@ -128,7 +128,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   native-package:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/v')
     needs: [test, build]
     strategy:
       fail-fast: false
@@ -148,6 +150,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Verify tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
         run: python scripts/verify-tag-version.py
       - name: Install native builder and core runtime
         run: python -m pip install --upgrade pip "setuptools>=83" wheel ".[native]"

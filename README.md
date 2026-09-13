@@ -57,7 +57,7 @@ gateway. It may be required to pair cloud devices or obtain encryption keys.
 
 ## Supported hosts
 
-Linux x86_64/arm64 is supported on Debian-family and Red Hat-family distributions, with either internal Bluetooth or a USB Bluetooth dongle managed by BlueZ. Windows 11+ and macOS Tahoe 26+ are also supported through native Bleak backends; tagged releases build native CI bundles. See [`docs/HOSTS.en.md`](docs/HOSTS.en.md).
+Linux x86_64/arm64 is supported on Debian-family and Red Hat-family distributions, with either internal Bluetooth or a USB Bluetooth dongle managed by BlueZ. Windows 11+ and macOS Tahoe 26+ are also supported through native Bleak backends; pushes to `main` and release tags build native CI bundles. See [`docs/HOSTS.en.md`](docs/HOSTS.en.md).
 
 On Linux with multiple controllers use `--bluetooth-adapter hci1`; on Windows/macOS the operating system selects the controller.
 

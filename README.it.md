@@ -57,7 +57,7 @@ servire per associare un dispositivo cloud o ottenere chiavi.
 
 ## Host supportati
 
-Linux x86_64/arm64 è supportato sulle famiglie Debian e Red Hat, usando Bluetooth interno oppure un dongle Bluetooth USB gestito da BlueZ. Sono inoltre supportati Windows 11+ e macOS Tahoe 26+ tramite i backend nativi Bleak; le release taggate generano bundle nativi in CI. Vedere [`docs/HOSTS.it.md`](docs/HOSTS.it.md).
+Linux x86_64/arm64 è supportato sulle famiglie Debian e Red Hat, usando Bluetooth interno oppure un dongle Bluetooth USB gestito da BlueZ. Sono inoltre supportati Windows 11+ e macOS Tahoe 26+ tramite i backend nativi Bleak; i push su `main` e i tag di release generano bundle nativi in CI. Vedere [`docs/HOSTS.it.md`](docs/HOSTS.it.md).
 
 Su Linux con più controller usare `--bluetooth-adapter hci1`; su Windows/macOS il controller viene scelto dal sistema operativo.
 
