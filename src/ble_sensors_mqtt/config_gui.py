@@ -5,8 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import plistlib
-import shutil
-import subprocess  # nosec B404 - only fixed, trusted OS commands are executed
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -17,24 +16,6 @@ from .config import atomic_write_config, default_config, default_config_path, lo
 APP = "ble-sensors-mqtt"
 WINDOWS_SERVICE = "ble-sensors-mqtt"
 MAC_LABEL = "com.desalvo.ble-sensors-mqtt"
-
-
-def _trusted_executable(name: str) -> str:
-    """Resolve a fixed OS utility to an absolute path before execution."""
-    resolved = shutil.which(name)
-    if not resolved:
-        raise FileNotFoundError(f"Required system utility not found: {name}")
-    return resolved
-
-
-def _run_trusted(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-    """Run a command assembled only from trusted application constants/validated actions."""
-    return subprocess.run(args, **kwargs)  # nosec B603
-
-
-def _popen_trusted(args: list[str]) -> subprocess.Popen[bytes]:
-    """Open a trusted OS utility with no shell and a fixed executable path."""
-    return subprocess.Popen(args)  # nosec B603
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -67,11 +48,12 @@ def daemon_executable() -> Path:
 
 def _windows_service(action: str) -> subprocess.CompletedProcess[str]:
     mapping = {"start": "start", "stop": "stop", "restart": None, "status": "query"}
-    sc = _trusted_executable("sc.exe")
     if action == "restart":
-        _run_trusted([sc, "stop", WINDOWS_SERVICE], capture_output=True, text=True)
-        return _run_trusted([sc, "start", WINDOWS_SERVICE], capture_output=True, text=True)
-    return _run_trusted([sc, mapping[action], WINDOWS_SERVICE], capture_output=True, text=True)
+        subprocess.run(["sc.exe", "stop", WINDOWS_SERVICE], capture_output=True, text=True)
+        return subprocess.run(["sc.exe", "start", WINDOWS_SERVICE], capture_output=True, text=True)
+    return subprocess.run(
+        ["sc.exe", mapping[action], WINDOWS_SERVICE], capture_output=True, text=True
+    )
 
 
 def _mac_agent_plist() -> Path:
@@ -105,16 +87,16 @@ def _mac_service(action: str) -> subprocess.CompletedProcess[str]:
     plist = _mac_agent_plist()
     if action == "start":
         plist = _mac_write_agent()
-        _run_trusted([_trusted_executable("launchctl"), "bootout", target], capture_output=True, text=True)
-        return _run_trusted([_trusted_executable("launchctl"), "bootstrap", domain, str(plist)], capture_output=True, text=True)
+        subprocess.run(["launchctl", "bootout", target], capture_output=True, text=True)
+        return subprocess.run(["launchctl", "bootstrap", domain, str(plist)], capture_output=True, text=True)
     if action == "stop":
-        return _run_trusted([_trusted_executable("launchctl"), "bootout", target], capture_output=True, text=True)
+        return subprocess.run(["launchctl", "bootout", target], capture_output=True, text=True)
     if action == "restart":
         if not plist.exists():
             _mac_write_agent()
-            _run_trusted([_trusted_executable("launchctl"), "bootstrap", domain, str(plist)], capture_output=True, text=True)
-        return _run_trusted([_trusted_executable("launchctl"), "kickstart", "-k", target], capture_output=True, text=True)
-    return _run_trusted([_trusted_executable("launchctl"), "print", target], capture_output=True, text=True)
+            subprocess.run(["launchctl", "bootstrap", domain, str(plist)], capture_output=True, text=True)
+        return subprocess.run(["launchctl", "kickstart", "-k", target], capture_output=True, text=True)
+    return subprocess.run(["launchctl", "print", target], capture_output=True, text=True)
 
 
 def service_action(action: str) -> tuple[bool, str]:
@@ -124,8 +106,8 @@ def service_action(action: str) -> tuple[bool, str]:
         elif sys.platform == "darwin":
             result = _mac_service(action)
         else:
-            result = _run_trusted(
-                [_trusted_executable("systemctl"), action if action != "status" else "status", APP],
+            result = subprocess.run(
+                ["systemctl", action if action != "status" else "status", APP],
                 capture_output=True,
                 text=True,
             )
@@ -389,7 +371,7 @@ def run_gui() -> int:
         try:
             exe = daemon_executable()
             cmd = [str(exe), "--scan", "--scan-duration", "5", "--config", str(path)]
-            result = _run_trusted(cmd, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             output = (result.stdout or result.stderr or "No output")[:10000]
             messagebox.showinfo("Bluetooth test", output)
         except Exception as exc:
@@ -398,11 +380,11 @@ def run_gui() -> int:
     def open_folder() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
-            os.startfile(path.parent)  # type: ignore[attr-defined]  # nosec B606
+            os.startfile(path.parent)  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
-            _popen_trusted([_trusted_executable("open"), str(path.parent)])
+            subprocess.Popen(["open", str(path.parent)])
         else:
-            _popen_trusted([_trusted_executable("xdg-open"), str(path.parent)])
+            subprocess.Popen(["xdg-open", str(path.parent)])
 
     buttons = ttk.Frame(root)
     buttons.pack(fill="x", padx=12, pady=(4, 12))

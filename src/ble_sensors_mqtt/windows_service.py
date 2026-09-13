@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 - launches only the fixed installed gateway executable
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,9 +51,7 @@ if sys.platform == "win32":
             servicemanager.LogInfoMsg(f"Starting {DISPLAY_NAME}")
             command = [str(_runtime()), "--config", str(_config())]
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self.process = subprocess.Popen(  # nosec B603 - command is a fixed installed executable/config path
-                command, creationflags=creationflags
-            )
+            self.process = subprocess.Popen(command, creationflags=creationflags)
             while True:
                 if win32event.WaitForSingleObject(self.stop_event, 500) == win32event.WAIT_OBJECT_0:
                     break

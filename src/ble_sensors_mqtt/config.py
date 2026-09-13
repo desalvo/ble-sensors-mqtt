@@ -262,7 +262,7 @@ def default_config() -> dict[str, Any]:
             "client_id": "",
             "topic_prefix": "ble-sensors",
             "username": "",
-            "password_file": "",  # nosec B105 - empty path, not a credential
+            "password_file": "",
             "tls": False,
             "ca_file": "",
             "connect_timeout": 15.0,
@@ -294,14 +294,13 @@ def default_config() -> dict[str, Any]:
             "tls_cert": "",
             "tls_key": "",
             "ldap": {
-                "enabled": False, "uri": "", "bind_dn": "", "bind_password_file": "",  # nosec B105 - empty path, not a credential
+                "enabled": False, "uri": "", "bind_dn": "", "bind_password_file": "",
                 "base_dn": "", "user_filter": "(uid={username})", "user_dn_template": "",
                 "default_role": "reader", "start_tls": False,
             },
             "oidc": {
                 "enabled": False, "name": "SSO", "metadata_url": "", "client_id": "",
-                "client_secret_file": "",  # nosec B105 - empty path, not a credential
-                "scopes": "openid profile email",
+                "client_secret_file": "", "scopes": "openid profile email",
                 "username_claim": "preferred_username", "default_role": "reader",
             },
         },

@@ -1,5 +1,221 @@
-{% extends 'base.html' %}{% block content %}<section class="page-head"><div><h1>Sensor dashboard</h1><p>Live normalized snapshots for every exported sensor.</p></div><span id="health" class="pill {{'ok' if health.ready else 'warn'}}">{{'Ready' if health.ready else 'Starting'}}</span></section>
-<div class="stats"><div class="stat"><b id="count">{{sensors|length}}</b><span>Exported sensors</span></div><div class="stat"><b id="stale">{{sensors.values()|selectattr('stale')|list|length}}</b><span>Stale</span></div><div class="stat"><b>{{health.cycles_total}}</b><span>Polling cycles</span></div><div class="stat"><b>{{health.cycles_failed}}</b><span>Failed cycles</span></div></div>
-<section class="panel"><div class="toolbar"><h2>Status</h2><input id="search" placeholder="Search sensor…"></div><div class="sensor-grid" id="sensors">{% for address,s in sensors.items() %}<article class="sensor-card" data-search="{{(s.name or '')|lower}} {{address|lower}} {{(s.model or '')|lower}}"><div class="sensor-top"><div><h3>{{s.name or address}}</h3><small>{{s.manufacturer}} · {{s.model}}</small></div><span class="pill {{'warn' if s.stale else 'ok'}}">{{'Stale' if s.stale else 'Live'}}</span></div><dl><dt>Address</dt><dd>{{address}}</dd><dt>Protocol</dt><dd>{{s.protocol}}</dd><dt>RSSI</dt><dd>{{s.rssi}}</dd><dt>Observed</dt><dd>{{s.observed_at}}</dd></dl><div class="values">{% for k,v in s.data.items() if k != 'units' %}<span><b>{{k}}</b> {{v}}</span>{% endfor %}</div></article>{% endfor %}</div></section>
-<script>const token={{csrf_token|tojson}};const render=(obj)=>{document.querySelector('#count').textContent=Object.keys(obj.sensors).length;document.querySelector('#stale').textContent=Object.values(obj.sensors).filter(x=>x.stale).length;document.querySelector('#health').textContent=obj.health.ready?'Ready':'Degraded';document.querySelector('#health').className='pill '+(obj.health.ready?'ok':'warn');};setInterval(()=>fetch('{{url_for('api_sensors')}}').then(r=>r.json()).then(render).catch(()=>{}),5000);document.querySelector('#search').addEventListener('input',e=>{let q=e.target.value.toLowerCase();document.querySelectorAll('.sensor-card').forEach(x=>x.hidden=!x.dataset.search.includes(q));});</script>
+{% extends 'base.html' %}
+{% block title %}Dashboard · ble-sensors-mqtt{% endblock %}
+{% block content %}
+<section class="dashboard-hero">
+  <div class="dashboard-hero-overlay"></div>
+  <div class="dashboard-hero-copy">
+    <span class="eyebrow">BLE SENSOR OPERATIONS</span>
+    <h1>Live environmental intelligence</h1>
+    <p>Immediate visibility of temperature, humidity, presence, battery and every normalized sensor value.</p>
+    <div class="hero-status-row">
+      <span id="hero-health" class="status-chip {{ 'online' if health.ready else 'degraded' }}">
+        <span class="status-dot"></span>{{ 'Gateway ready' if health.ready else 'Gateway starting' }}
+      </span>
+      <span class="hero-meta"><strong id="hero-count">{{ sensors|length }}</strong> sensors exported</span>
+      <span class="hero-meta"><strong id="hero-stale">{{ sensors.values()|selectattr('stale')|list|length }}</strong> stale</span>
+    </div>
+  </div>
+</section>
+
+<section class="sensor-kpis" aria-label="Sensor summary">
+  <article class="kpi-card temperature">
+    <div class="kpi-icon">🌡️</div>
+    <div><span>Average temperature</span><strong id="kpi-temperature">—</strong><small id="kpi-temperature-count">No readings</small></div>
+  </article>
+  <article class="kpi-card humidity">
+    <div class="kpi-icon">💧</div>
+    <div><span>Average humidity</span><strong id="kpi-humidity">—</strong><small id="kpi-humidity-count">No readings</small></div>
+  </article>
+  <article class="kpi-card presence">
+    <div class="kpi-icon">●</div>
+    <div><span>Active presence / motion</span><strong id="kpi-presence">0</strong><small id="kpi-presence-count">No active detections</small></div>
+  </article>
+  <article class="kpi-card battery">
+    <div class="kpi-icon">▰</div>
+    <div><span>Average battery</span><strong id="kpi-battery">—</strong><small id="kpi-battery-count">No readings</small></div>
+  </article>
+</section>
+
+<section class="panel dashboard-panel">
+  <div class="dashboard-toolbar">
+    <div>
+      <span class="eyebrow dark">REAL-TIME SENSOR STATUS</span>
+      <h2>Exported sensors</h2>
+      <p>Primary environmental values are highlighted; all other normalized values remain visible below.</p>
+    </div>
+    <div class="dashboard-tools">
+      <input id="search" autocomplete="off" placeholder="Search sensor, model, address…" aria-label="Search sensors">
+      <select id="status-filter" aria-label="Filter by status">
+        <option value="all">All states</option>
+        <option value="live">Live only</option>
+        <option value="stale">Stale only</option>
+      </select>
+      <button id="refresh-now" type="button" class="secondary">Refresh</button>
+    </div>
+  </div>
+  <div class="sensor-grid dashboard-sensor-grid" id="sensors"></div>
+  <div class="empty-state" id="sensor-empty" hidden>No sensors match the current filter.</div>
+</section>
+
+<section class="dashboard-foot-grid">
+  <article class="panel operations-card">
+    <span class="eyebrow dark">GATEWAY HEALTH</span>
+    <h2>Polling activity</h2>
+    <div class="health-numbers">
+      <div><strong id="cycles-total">{{ health.cycles_total }}</strong><span>Polling cycles</span></div>
+      <div><strong id="cycles-failed">{{ health.cycles_failed }}</strong><span>Failed cycles</span></div>
+      <div><strong id="health-state">{{ 'Ready' if health.ready else 'Starting' }}</strong><span>Current state</span></div>
+    </div>
+  </article>
+  <article class="dashboard-art-card" aria-label="ble-sensors-mqtt visual overview">
+    <img src="{{ url_for('static', filename='dashboard-hero.png') }}" alt="Professional visual overview of the ble-sensors-mqtt sensor dashboard">
+    <div><strong>From BLE packets to useful environmental data</strong><span>MQTT · Home Assistant · Prometheus · SNMP</span></div>
+  </article>
+</section>
+
+<script>
+const initialSensors = {{ sensors|tojson }};
+const initialHealth = {{ health|tojson }};
+const endpoint = {{ url_for('api_sensors')|tojson }};
+
+const aliases = {
+  temperature: ['temperature','temperature_c','temperature_celsius','temp','temp_c'],
+  humidity: ['humidity','relative_humidity','humidity_percent'],
+  battery: ['battery','battery_level','battery_percent'],
+  presence: ['presence','occupancy','motion','moving','move_detected','movedetected','detected','detection_state','detectionstate','human_presence','humanpresence']
+};
+
+function normalizeKey(value) {
+  return String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+function scalarEntries(sensor) {
+  const data = sensor && sensor.data && typeof sensor.data === 'object' ? sensor.data : {};
+  return Object.entries(data).filter(([key,value]) => key !== 'units' && value !== null && typeof value !== 'object');
+}
+function findValue(sensor, names) {
+  const wanted = new Set(names.map(normalizeKey));
+  for (const [key,value] of scalarEntries(sensor)) if (wanted.has(normalizeKey(key))) return {key,value};
+  return null;
+}
+function numberValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number.parseFloat(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function boolValue(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  return ['1','true','yes','on','present','presence','occupied','detected','motion','moving','active'].includes(text);
+}
+function esc(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+function formatNumber(value, digits=1) {
+  const n = numberValue(value); return n === null ? '—' : n.toFixed(digits).replace(/\.0$/, '');
+}
+function unitFor(sensor, key, fallback='') {
+  const units = sensor?.data?.units;
+  if (units && typeof units === 'object' && units[key]) return String(units[key]);
+  return fallback;
+}
+function metric(sensor, kind) {
+  const hit = findValue(sensor, aliases[kind]);
+  if (!hit) return null;
+  if (kind === 'presence') return {kind,key:hit.key,value:boolValue(hit.value),display:boolValue(hit.value) ? 'Active' : 'Clear',unit:''};
+  const fallback = kind === 'temperature' ? '°C' : kind === 'humidity' || kind === 'battery' ? '%' : '';
+  return {kind,key:hit.key,value:numberValue(hit.value),display:formatNumber(hit.value),unit:unitFor(sensor, hit.key, fallback)};
+}
+function primaryMetrics(sensor) {
+  return ['temperature','humidity','presence','battery'].map(kind => metric(sensor,kind)).filter(Boolean);
+}
+function icon(kind) { return {temperature:'🌡️',humidity:'💧',presence:'●',battery:'▰'}[kind] || '•'; }
+function niceName(key) { return String(key).replace(/[_\.]+/g,' ').replace(/\b\w/g, c => c.toUpperCase()); }
+
+function sensorCard(address, sensor) {
+  const primary = primaryMetrics(sensor);
+  const used = new Set(primary.map(x => normalizeKey(x.key)));
+  const extra = scalarEntries(sensor).filter(([key]) => !used.has(normalizeKey(key))).slice(0, 8);
+  const name = sensor.name || address;
+  const search = [name,address,sensor.manufacturer,sensor.model,sensor.protocol,...scalarEntries(sensor).flat()].join(' ').toLowerCase();
+  const status = sensor.stale ? 'stale' : 'live';
+  const metricsHtml = primary.length ? primary.map(m => `
+    <div class="primary-reading ${m.kind} ${m.kind === 'presence' && m.value ? 'active' : ''}">
+      <span class="reading-icon">${icon(m.kind)}</span>
+      <span class="reading-label">${esc(niceName(m.kind))}</span>
+      <strong>${esc(m.display)}${m.unit ? `<small>${esc(m.unit)}</small>` : ''}</strong>
+    </div>`).join('') : '<div class="no-primary">No common environmental values reported</div>';
+  const extraHtml = extra.length ? extra.map(([key,value]) => `<span class="secondary-reading"><b>${esc(niceName(key))}</b><strong>${esc(value)}${unitFor(sensor,key) ? ' '+esc(unitFor(sensor,key)) : ''}</strong></span>`).join('') : '<span class="secondary-reading muted">No additional values</span>';
+  return `<article class="sensor-card rich-sensor-card" data-search="${esc(search)}" data-status="${status}">
+    <div class="sensor-card-head">
+      <div class="sensor-ident"><div class="device-orb">◉</div><div><h3>${esc(name)}</h3><small>${esc(sensor.manufacturer || 'Unknown manufacturer')} · ${esc(sensor.model || sensor.protocol || 'Unknown model')}</small></div></div>
+      <span class="status-chip ${status === 'live' ? 'online' : 'degraded'}"><span class="status-dot"></span>${status === 'live' ? 'Live' : 'Stale'}</span>
+    </div>
+    <div class="primary-readings">${metricsHtml}</div>
+    <div class="secondary-readings">${extraHtml}</div>
+    <div class="sensor-card-meta">
+      <span><b>RSSI</b> ${esc(sensor.rssi ?? '—')} dBm</span>
+      <span><b>Protocol</b> ${esc(sensor.protocol || '—')}</span>
+      <span><b>Observed</b> ${esc(sensor.observed_at || '—')}</span>
+      <span class="address"><b>Address</b> ${esc(address)}</span>
+    </div>
+  </article>`;
+}
+
+let latest = {sensors: initialSensors, health: initialHealth};
+function updateKpis(sensors) {
+  const values = Object.values(sensors || {});
+  const groups = {temperature:[],humidity:[],battery:[]}; let present = 0; let presenceCapable = 0;
+  values.forEach(sensor => {
+    ['temperature','humidity','battery'].forEach(kind => { const m=metric(sensor,kind); if (m && m.value !== null) groups[kind].push(m.value); });
+    const p=metric(sensor,'presence'); if (p) { presenceCapable++; if (p.value) present++; }
+  });
+  const avg = list => list.length ? list.reduce((a,b)=>a+b,0)/list.length : null;
+  const t=avg(groups.temperature), h=avg(groups.humidity), b=avg(groups.battery);
+  document.querySelector('#kpi-temperature').textContent = t===null?'—':`${formatNumber(t)} °C`;
+  document.querySelector('#kpi-humidity').textContent = h===null?'—':`${formatNumber(h)} %`;
+  document.querySelector('#kpi-battery').textContent = b===null?'—':`${formatNumber(b)} %`;
+  document.querySelector('#kpi-presence').textContent = present;
+  document.querySelector('#kpi-temperature-count').textContent = `${groups.temperature.length} sensor${groups.temperature.length===1?'':'s'} reporting`;
+  document.querySelector('#kpi-humidity-count').textContent = `${groups.humidity.length} sensor${groups.humidity.length===1?'':'s'} reporting`;
+  document.querySelector('#kpi-battery-count').textContent = `${groups.battery.length} sensor${groups.battery.length===1?'':'s'} reporting`;
+  document.querySelector('#kpi-presence-count').textContent = presenceCapable ? `${present} active of ${presenceCapable} capable` : 'No presence-capable sensors';
+}
+function applyFilters() {
+  const q = document.querySelector('#search').value.trim().toLowerCase();
+  const status = document.querySelector('#status-filter').value;
+  let visible = 0;
+  document.querySelectorAll('.rich-sensor-card').forEach(card => {
+    const show = (!q || card.dataset.search.includes(q)) && (status === 'all' || card.dataset.status === status);
+    card.hidden = !show; if (show) visible++;
+  });
+  document.querySelector('#sensor-empty').hidden = visible !== 0;
+}
+function render(obj) {
+  latest = obj;
+  const sensors = obj.sensors || {}; const health = obj.health || {};
+  const count = Object.keys(sensors).length; const stale = Object.values(sensors).filter(x => x.stale).length;
+  document.querySelector('#hero-count').textContent = count;
+  document.querySelector('#hero-stale').textContent = stale;
+  const hero = document.querySelector('#hero-health');
+  hero.className = 'status-chip ' + (health.ready ? 'online' : 'degraded');
+  hero.innerHTML = `<span class="status-dot"></span>${health.ready ? 'Gateway ready' : 'Gateway degraded'}`;
+  document.querySelector('#cycles-total').textContent = health.cycles_total ?? 0;
+  document.querySelector('#cycles-failed').textContent = health.cycles_failed ?? 0;
+  document.querySelector('#health-state').textContent = health.ready ? 'Ready' : 'Degraded';
+  updateKpis(sensors);
+  document.querySelector('#sensors').innerHTML = Object.entries(sensors).map(([address,sensor]) => sensorCard(address,sensor)).join('');
+  applyFilters();
+}
+async function refresh() {
+  const button = document.querySelector('#refresh-now'); button.disabled = true;
+  try { const response = await fetch(endpoint,{headers:{'Accept':'application/json'},cache:'no-store'}); if (response.ok) render(await response.json()); }
+  finally { button.disabled = false; }
+}
+document.querySelector('#search').addEventListener('input', applyFilters);
+document.querySelector('#status-filter').addEventListener('change', applyFilters);
+document.querySelector('#refresh-now').addEventListener('click', refresh);
+render(latest);
+setInterval(refresh, 5000);
+</script>
 {% endblock %}
