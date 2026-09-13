@@ -60,7 +60,8 @@ class MQTTCache:
         row = self._db.execute(
             "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM messages"
         ).fetchone()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("failed to read MQTT cache statistics")
         return int(row[0]), int(row[1])
 
     def enqueue(self, topic: str, payload: bytes, qos: int, retain: bool) -> tuple[int, int]:

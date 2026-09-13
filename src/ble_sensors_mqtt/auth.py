@@ -110,7 +110,13 @@ class AuthStore:
         )
         self.db.commit()
         if not self.db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-            self.create_user("admin", "admin", auth_source="local", password="password", must_change=True)
+            self.create_user(
+                "admin",
+                "admin",
+                auth_source="local",
+                password="password",  # nosec B106 - required bootstrap credential, forced reset
+                must_change=True,
+            )
 
     def close(self) -> None:
         self.db.close()

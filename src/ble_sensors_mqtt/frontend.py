@@ -94,7 +94,7 @@ def _ldap_auth(config: dict[str, Any], username: str, password: str) -> bool:
         return True
 
     bind_dn = str(config.get("bind_dn", "")).strip()
-    bind_password = ""
+    bind_password = ""  # nosec B105 - initialized empty, loaded from file when configured
     bind_file = str(config.get("bind_password_file", "")).strip()
     if bind_file:
         bind_password = Path(bind_file).read_text(encoding="utf-8").strip()

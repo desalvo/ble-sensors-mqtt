@@ -5,7 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import plistlib
-import subprocess
+import subprocess  # nosec B404 - fixed local OS service-management commands only
 import sys
 import tempfile
 from pathlib import Path
@@ -16,6 +16,12 @@ from .config import atomic_write_config, default_config, default_config_path, lo
 APP = "ble-sensors-mqtt"
 WINDOWS_SERVICE = "ble-sensors-mqtt"
 MAC_LABEL = "com.desalvo.ble-sensors-mqtt"
+
+WINDOWS_SC = str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "sc.exe")
+MAC_LAUNCHCTL = "/bin/launchctl"
+MAC_OPEN = "/usr/bin/open"
+LINUX_SYSTEMCTL = "/usr/bin/systemctl"
+LINUX_XDG_OPEN = "/usr/bin/xdg-open"
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -49,10 +55,10 @@ def daemon_executable() -> Path:
 def _windows_service(action: str) -> subprocess.CompletedProcess[str]:
     mapping = {"start": "start", "stop": "stop", "restart": None, "status": "query"}
     if action == "restart":
-        subprocess.run(["sc.exe", "stop", WINDOWS_SERVICE], capture_output=True, text=True)
-        return subprocess.run(["sc.exe", "start", WINDOWS_SERVICE], capture_output=True, text=True)
-    return subprocess.run(
-        ["sc.exe", mapping[action], WINDOWS_SERVICE], capture_output=True, text=True
+        subprocess.run([WINDOWS_SC, "stop", WINDOWS_SERVICE], capture_output=True, text=True)  # nosec B603
+        return subprocess.run([WINDOWS_SC, "start", WINDOWS_SERVICE], capture_output=True, text=True)  # nosec B603
+    return subprocess.run(  # nosec B603
+        [WINDOWS_SC, mapping[action], WINDOWS_SERVICE], capture_output=True, text=True
     )
 
 
@@ -87,16 +93,16 @@ def _mac_service(action: str) -> subprocess.CompletedProcess[str]:
     plist = _mac_agent_plist()
     if action == "start":
         plist = _mac_write_agent()
-        subprocess.run(["launchctl", "bootout", target], capture_output=True, text=True)
-        return subprocess.run(["launchctl", "bootstrap", domain, str(plist)], capture_output=True, text=True)
+        subprocess.run([MAC_LAUNCHCTL, "bootout", target], capture_output=True, text=True)  # nosec B603
+        return subprocess.run([MAC_LAUNCHCTL, "bootstrap", domain, str(plist)], capture_output=True, text=True)  # nosec B603
     if action == "stop":
-        return subprocess.run(["launchctl", "bootout", target], capture_output=True, text=True)
+        return subprocess.run([MAC_LAUNCHCTL, "bootout", target], capture_output=True, text=True)  # nosec B603
     if action == "restart":
         if not plist.exists():
             _mac_write_agent()
-            subprocess.run(["launchctl", "bootstrap", domain, str(plist)], capture_output=True, text=True)
-        return subprocess.run(["launchctl", "kickstart", "-k", target], capture_output=True, text=True)
-    return subprocess.run(["launchctl", "print", target], capture_output=True, text=True)
+            subprocess.run([MAC_LAUNCHCTL, "bootstrap", domain, str(plist)], capture_output=True, text=True)  # nosec B603
+        return subprocess.run([MAC_LAUNCHCTL, "kickstart", "-k", target], capture_output=True, text=True)  # nosec B603
+    return subprocess.run([MAC_LAUNCHCTL, "print", target], capture_output=True, text=True)  # nosec B603
 
 
 def service_action(action: str) -> tuple[bool, str]:
@@ -106,8 +112,8 @@ def service_action(action: str) -> tuple[bool, str]:
         elif sys.platform == "darwin":
             result = _mac_service(action)
         else:
-            result = subprocess.run(
-                ["systemctl", action if action != "status" else "status", APP],
+            result = subprocess.run(  # nosec B603
+                [LINUX_SYSTEMCTL, action if action != "status" else "status", APP],
                 capture_output=True,
                 text=True,
             )
@@ -371,7 +377,7 @@ def run_gui() -> int:
         try:
             exe = daemon_executable()
             cmd = [str(exe), "--scan", "--scan-duration", "5", "--config", str(path)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)  # nosec B603
             output = (result.stdout or result.stderr or "No output")[:10000]
             messagebox.showinfo("Bluetooth test", output)
         except Exception as exc:
@@ -380,11 +386,11 @@ def run_gui() -> int:
     def open_folder() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
-            os.startfile(path.parent)  # type: ignore[attr-defined]
+            os.startfile(path.parent)  # type: ignore[attr-defined]  # nosec B606
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path.parent)])
+            subprocess.Popen([MAC_OPEN, str(path.parent)])  # nosec B603
         else:
-            subprocess.Popen(["xdg-open", str(path.parent)])
+            subprocess.Popen([LINUX_XDG_OPEN, str(path.parent)])  # nosec B603
 
     buttons = ttk.Frame(root)
     buttons.pack(fill="x", padx=12, pady=(4, 12))
