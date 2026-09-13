@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ble-sensors-mqtt-arguments}
+data:
+  arguments: |
+    --device-name
+    AA:BB:CC:DD:EE:01=Living room
+    --device-name
+    AA:BB:CC:DD:EE:02=Bedroom

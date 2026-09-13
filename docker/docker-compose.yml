@@ -1,0 +1,20 @@
+services:
+  ble-sensors-mqtt:
+    image: desalvo/ble-sensors-mqtt:1.0.0
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DBUS_SYSTEM_BUS_ADDRESS: unix:path=/run/dbus/system_bus_socket
+    ports:
+      - "9105:9105/tcp"
+      - "1161:1161/udp"
+    volumes:
+      - /run/dbus:/run/dbus:ro
+      - ble-sensors-state:/var/lib/ble-sensors-mqtt
+      - ./arguments:/etc/ble-sensors-mqtt/arguments:ro
+      - ./secrets/mqtt-password:/run/secrets/mqtt-password:ro
+      # - ./secrets/snmp-community:/run/secrets/snmp-community:ro
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+volumes:
+  ble-sensors-state:

@@ -27,6 +27,10 @@ La release deve includere wheel, sdist, SBOM, checksum, archivio sorgente del pr
 
 ### GitHub Release automatica
 
-Il workflow GitHub Actions può essere avviato anche manualmente tramite `workflow_dispatch`. Push normali e pull request eseguono soltanto la validazione. Il push di un tag `v*` esegue la stessa matrice di test e il gate di build e, soltanto se tutti i job prerequisiti terminano con successo, avvia un job di release con permesso `contents: write` limitato al repository. Il job verifica che `vX.Y.Z` corrisponda sia a `VERSION` sia a `[project].version` in `pyproject.toml`, scarica gli artefatti generati dal job di build, crea un `SHA256SUMS.txt` consolidato e crea o aggiorna la GitHub Release usando il comando `gh` e il `GITHUB_TOKEN` fornito da GitHub Actions.
+Il workflow GitHub Actions può essere avviato anche manualmente tramite `workflow_dispatch`. Le pull request e i push ordinari non di release eseguono la validazione; un push su `main` può inoltre pubblicare l'immagine Docker opzionale `latest` quando la pubblicazione Docker Hub è abilitata. Il push di un tag `v*` esegue la stessa matrice di test e il gate di build e, soltanto se tutti i job prerequisiti terminano con successo, avvia un job di release con permesso `contents: write` limitato al repository. Il job verifica che `vX.Y.Z` corrisponda sia a `VERSION` sia a `[project].version` in `pyproject.toml`, scarica gli artefatti generati dal job di build, crea un `SHA256SUMS.txt` consolidato e crea o aggiorna la GitHub Release usando il comando `gh` e il `GITHUB_TOKEN` fornito da GitHub Actions.
 
 Non sostituire artefatti CI falliti con file costruiti manualmente. Gli asset pubblicati devono provenire dal commit taggato che ha superato la CI. Il rerun di un workflow di tag parzialmente completato è sicuro: gli asset esistenti vengono sostituiti con `--clobber`.
+
+## Docker Hub CI
+
+Impostare la variabile repository `DOCKERHUB_PUSH_ENABLED=true`, la variabile `DOCKERHUB_USERNAME=desalvo` e il secret `DOCKERHUB_TOKEN`. Dopo test/build, i push su `main` pubblicano `desalvo/ble-sensors-mqtt:latest`; i tag `vX.Y.Z` pubblicano `desalvo/ble-sensors-mqtt:X.Y.Z` per amd64 e arm64.

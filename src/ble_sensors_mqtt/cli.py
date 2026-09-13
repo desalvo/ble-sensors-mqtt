@@ -186,6 +186,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--mqtt-port", type=mqtt_port, default=None)
     result.add_argument("--mqtt-client-id", default=f"ble-sensors-mqtt-{os.uname().nodename}")
     result.add_argument("--mqtt-topic-prefix", type=topic_prefix, default="ble-sensors")
+    result.add_argument(
+        "--home-assistant-discovery", action="store_true",
+        help="publish retained Home Assistant MQTT Discovery configuration",
+    )
+    result.add_argument(
+        "--home-assistant-discovery-prefix", type=topic_prefix, default="homeassistant",
+        help="Home Assistant MQTT Discovery prefix (default: homeassistant)",
+    )
     result.add_argument("--mqtt-username")
     result.add_argument("--mqtt-password-file", type=Path)
     result.add_argument(
@@ -586,6 +594,7 @@ async def bridge(args: argparse.Namespace) -> int:
                 }
                 store.replace(exported)
                 current_topics: set[str] = set()
+                current_discovery_topics: set[str] = set()
                 for address, payload in sorted(exported.items()):
                     topic = f"{prefix}/{topic_part(address)}/state"
                     current_topics.add(topic)
@@ -602,8 +611,45 @@ async def bridge(args: argparse.Namespace) -> int:
                     info.wait_for_publish(args.mqtt_connect_timeout)
                     missing_cycles.pop(topic, None)
 
+                    if args.home_assistant_discovery:
+                        from .homeassistant import discovery_messages
+
+                        configs = discovery_messages(
+                            discovery_prefix=args.home_assistant_discovery_prefix,
+                            mqtt_prefix=prefix,
+                            address=address,
+                            payload=payload,
+                        )
+                        for config_topic, config_payload in sorted(configs.items()):
+                            current_discovery_topics.add(config_topic)
+                            discovery_info = client.publish(
+                                config_topic, config_payload, qos=1, retain=True
+                            )
+                            if discovery_info.rc != mqtt.MQTT_ERR_SUCCESS:
+                                raise OSError(
+                                    f"Home Assistant discovery publish was not queued for {address}: "
+                                    f"rc={discovery_info.rc}"
+                                )
+                            discovery_info.wait_for_publish(args.mqtt_connect_timeout)
+                            missing_cycles.pop(config_topic, None)
+
+                previous_discovery_topics = {
+                    topic for topic in previously_published if topic.endswith("/config")
+                }
+                for stale_discovery_topic in previous_discovery_topics - current_discovery_topics:
+                    discovery_info = client.publish(
+                        stale_discovery_topic, b"", qos=1, retain=True
+                    )
+                    if discovery_info.rc == mqtt.MQTT_ERR_SUCCESS:
+                        discovery_info.wait_for_publish(args.mqtt_connect_timeout)
+                        missing_cycles.pop(stale_discovery_topic, None)
+                        LOG.info(
+                            "cleared stale Home Assistant discovery topic %s",
+                            stale_discovery_topic,
+                        )
+
                 if args.retain:
-                    for topic in previously_published - current_topics:
+                    for topic in (previously_published - current_topics) - previous_discovery_topics:
                         misses = missing_cycles.get(topic, 0) + 1
                         missing_cycles[topic] = misses
                         if misses >= args.stale_cycles:
@@ -612,9 +658,11 @@ async def bridge(args: argparse.Namespace) -> int:
                                 info.wait_for_publish(args.mqtt_connect_timeout)
                                 missing_cycles.pop(topic, None)
                                 LOG.info("cleared stale retained MQTT topic %s", topic)
-                    previously_published = current_topics | set(missing_cycles)
+                    previously_published = (
+                        current_topics | current_discovery_topics | set(missing_cycles)
+                    )
                 else:
-                    previously_published = current_topics
+                    previously_published = current_topics | current_discovery_topics
 
                 save_runtime_state(args.state_file, prefix, previously_published, missing_cycles)
                 store.mark_success()

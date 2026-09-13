@@ -1,9 +1,13 @@
 # Changelog
+- Aggiunti preflight Bluetooth host, mount `/run/dbus` esplicito per Docker/Kubernetes, pod Kubernetes di test BLE e installer bootstrap da clone GitHub con prerequisiti, venv e systemd.
 
 [English](CHANGELOG.en.md) · **Italiano**
 
 ## 1.0.0 - 2026-09-12
 
+- Aggiunti installer systemd interattivo/non-interattivo, Docker/Compose multiarch, manifest Kubernetes e pubblicazione Docker Hub in CI.
+
+- Aggiunto Home Assistant MQTT Discovery opzionale (`--home-assistant-discovery`) con raggruppamento per device, entità per valori scalari, device/state class e unità note, availability del bridge, configurazione retained e cleanup dei topic discovery obsoleti.
 - GitHub Actions pubblica ora automaticamente le release taggate `v*` solo dopo il superamento di tutti i gate test/build, con validazione tag/versione, asset costruiti dalla CI, checksum SHA-256 consolidati e aggiornamento idempotente degli asset.
 - Release irrobustita per produzione con regole fail-closed sull'esposizione di rete.
 - MQTT attende CONNACK e conferma delle publish, usa backoff di riconnessione e rifiuta connessioni remote/non cifrate o con credenziali/non cifrate salvo consenso esplicito.

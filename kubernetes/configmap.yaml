@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ble-sensors-mqtt
+data:
+  MQTT_HOST: "mqtt.example.net"
+  MQTT_PORT: "8883"
+  MQTT_TLS: "true"
+  POLL_INTERVAL: "30"
+  SCAN_DURATION: "8"
+  HOME_ASSISTANT_DISCOVERY: "true"
+  PROMETHEUS_ENABLED: "true"
+  PROMETHEUS_HOST: "0.0.0.0"
+  PROMETHEUS_PORT: "9105"
+  ALLOW_EXTERNAL_PROMETHEUS: "true"
+  SNMP_ENABLED: "false"
+  SNMP_HOST: "0.0.0.0"
+  SNMP_PORT: "1161"
+  ALLOW_EXTERNAL_SNMP: "true"

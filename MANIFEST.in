@@ -1,6 +1,12 @@
+include .dockerignore
 include VERSION BUILD LICENSE README.md README.en.md README.it.md SECURITY.en.md SECURITY.it.md CHANGELOG.en.md CHANGELOG.it.md
 recursive-include assets *.png
 recursive-include config *.toml *.example
 recursive-include docs *.md *.txt *.pdf
 recursive-include systemd *.service
 recursive-include scripts *.py *.sh
+
+recursive-include docker *
+recursive-include kubernetes *.yaml
+
+include docker/.env.example

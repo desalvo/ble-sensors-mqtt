@@ -1,0 +1,9 @@
+[
+  "--mqtt-host", "mqtt.example.net",
+  "--mqtt-port", "8883",
+  "--mqtt-tls",
+  "--mqtt-ca-file", "/etc/ssl/certs/ca-certificates.crt",
+  "--poll-interval", "30",
+  "--state-file", "/var/lib/ble-sensors-mqtt/state.json",
+  "--home-assistant-discovery"
+]

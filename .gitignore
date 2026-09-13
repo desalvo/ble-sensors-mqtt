@@ -14,3 +14,10 @@ ble-sensors-mqtt-v*.zip.sha256
 ble-sensors-mqtt-v*.tar.gz
 ble-sensors-mqtt-v*.tar.gz.sha256
 release/
+
+docker/.env
+docker/arguments
+docker/secrets/
+# Local Kubernetes runtime overrides / secrets
+kubernetes/secret.yaml
+kubernetes/arguments-configmap.yaml

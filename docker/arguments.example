@@ -1,0 +1,5 @@
+# One CLI argument per line; values with spaces remain one argument.
+--device-name
+AA:BB:CC:DD:EE:01=Living room
+--device-name
+AA:BB:CC:DD:EE:02=Bedroom

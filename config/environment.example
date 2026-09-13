@@ -1,8 +1,0 @@
-MQTT_HOST=mqtt.example.net
-MQTT_PORT=8883
-MQTT_USERNAME=ble-sensors-publisher
-POLL_INTERVAL=30
-# Optional production features. External Prometheus/SNMP binding is rejected unless the
-# corresponding explicit allow flag is also present.
-# EXTRA_ARGS=--cloud-config /etc/ble-sensors-mqtt/cloud.toml --prometheus
-EXTRA_ARGS=

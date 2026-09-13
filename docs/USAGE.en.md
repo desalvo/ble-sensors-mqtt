@@ -63,6 +63,17 @@ add `[ble_keys."MAC"]`, `plugin="xiaomi"` or `"bthome"`, and
 
 ## 5. Runtime and MQTT
 
+### Home Assistant MQTT Discovery
+
+Add `--home-assistant-discovery` to publish retained Home Assistant discovery configuration. The default discovery prefix is `homeassistant`; override it with `--home-assistant-discovery-prefix`. Each exported sensor becomes one Home Assistant device, with one sensor entity for each scalar payload value plus RSSI and protocol diagnostics. State remains on the regular gateway MQTT state topic and availability is tied to `<mqtt-prefix>/bridge/status`.
+
+```bash
+.venv/bin/ble-sensors-mqtt --mqtt-host 127.0.0.1 --home-assistant-discovery
+```
+
+Discovery configuration is retained. Stale discovery topics are explicitly cleared using retained empty payloads so removed sensors/entities disappear from Home Assistant. Keep the runtime state file enabled in long-running/systemd deployments so cleanup also works across restarts.
+
+
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 127.0.0.1 --once
 .venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --poll-interval 60 --allow-insecure-mqtt
@@ -131,26 +142,56 @@ proxy. The bundled MIB is `BLE-SENSORS-MQTT-MIB.txt`.
 
 ## 9. systemd
 
-Create the `ble-sensors-mqtt` service account, install the project in
-`/opt/ble-sensors-mqtt`, copy `config/environment.example` to
-`/etc/ble-sensors-mqtt/environment`, and install the included unit in
-`/etc/systemd/system/`. Then run:
+For a complete installation starting from a GitHub clone (host prerequisites, Bluetooth check, venv, and systemd):
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now ble-sensors-mqtt
-sudo systemctl status ble-sensors-mqtt
-journalctl -u ble-sensors-mqtt -f
+git clone https://github.com/desalvo/ble-sensors-mqtt.git
+cd ble-sensors-mqtt
+sudo scripts/install-from-github.sh --mqtt-host mqtt.example.net --prometheus
 ```
 
-The unit uses an unprivileged account, systemd isolation, and the `bluetooth` group. Put only
-non-secret options in `EXTRA_ARGS`, such as `--cloud-config ... --prometheus`.
+Use the systemd installer directly when the clone and prerequisites already exist:
 
-## 10. Extensions
+```bash
+# Interactive; CLI values are the defaults shown by the prompts
+sudo scripts/install-systemd.sh --mqtt-host mqtt.example.net --prometheus
+
+# Fully unattended provisioning
+sudo scripts/install-systemd.sh --non-interactive \
+  --mqtt-host mqtt.example.net --mqtt-tls \
+  --mqtt-username ble-sensors-publisher --mqtt-password-file ./mqtt-password \
+  --home-assistant-discovery --prometheus
+```
+
+The installer creates the service user, isolated venv, root-owned configuration and `/etc/ble-sensors-mqtt/service-args.json`; repeatable arguments and values containing spaces are preserved without shell parsing. In interactive mode, CLI values remain the defaults shown by the wizard and already supplied repeatable options are retained. Use `--non-interactive` to install only from CLI/default values. See `docs/SYSTEMD.en.md`.
+
+## 10. Docker and Kubernetes
+
+```bash
+# Multiarch build + Docker Hub push of desalvo/ble-sensors-mqtt:<VERSION>
+docker login
+scripts/build-docker.sh
+
+# Continuous Docker service
+cd docker
+cp .env.example .env
+cp arguments.example arguments
+docker compose up -d
+
+# Continuous Kubernetes service
+kubectl label node NODE_NAME ble-sensors-mqtt/bluetooth=true
+kubectl apply -k kubernetes/
+```
+
+Before Docker/Kubernetes, validate the host with `sudo scripts/check-bluetooth-host.sh --strict`. Both mount `/run/dbus` read-only and use host BlueZ over system D-Bus; privileged mode is not required in the supported model. Kubernetes also includes `kubernetes/bluetooth-test-pod.yaml` to validate `--scan` on the selected node.
+
+The image supports `linux/amd64` and `linux/arm64`. Docker/Kubernetes mount the host system D-Bus for BlueZ, persist runtime state, send MQTT outbound, expose Prometheus on TCP/9105 and SNMP on UDP/1161. Optional Kubernetes LoadBalancer manifests expose Prometheus and SNMP externally when explicitly applied. `scripts/build-docker.sh` pushes `desalvo/ble-sensors-mqtt:<VERSION>` by default; CI can publish the versioned image on `vX.Y.Z` tags and `latest` on `main`. See `docs/DOCKER.en.md` and `docs/KUBERNETES.en.md`; external monitoring endpoints must be restricted to trusted networks.
+
+## 11. Extensions
 
 A third-party local package implements `SensorPlugin.decode()`, returns `SensorReading` objects, and registers itself in the `ble_sensors_mqtt.sensor_plugins` entry-point group. A third-party cloud provider implements `CloudPlugin.poll()` and registers a factory/class in `ble_sensors_mqtt.cloud_plugins`; its constructor receives `(config, read_secret)` and its default TOML section is `[cloud.<entry-point-name-without--cloud>]`. Every reading must contain manufacturer, model, and protocol. Plugin exceptions are isolated.
 
-## 11. Security and troubleshooting
+## 12. Security and troubleshooting
 
 - do not run as root;
 - protect MQTT, Tuya, bind-key, and SNMP files;
@@ -168,13 +209,13 @@ journalctl -u ble-sensors-mqtt --since today
 
 The AgID review is a technical self-assessment, not a certification.
 
-## 12. Build and rollback
+## 13. Build and rollback
 
 `scripts/build-package.sh` generates a UTC build ID in `YYYYMMDD-HHMM` format, ZIP, TAR.GZ,
 and SHA-256 checksums. Keep the previous package for rollback; do not modify `site-packages`
 in place.
 
-## 13. Production health and release gates
+## 14. Production health and release gates
 
 ### Health and readiness
 

@@ -73,7 +73,24 @@ with zipfile.ZipFile(wheels[0]) as archive:
 
 
 with tarfile.open(sdists[0], "r:gz") as archive:
-    verify_member_names(archive.getnames(), sdists[0].name)
+    sdist_names = archive.getnames()
+    verify_member_names(sdist_names, sdists[0].name)
+    for required in (
+        ".dockerignore",
+        "docker/Dockerfile",
+        "docker/entrypoint.sh",
+        "docker/docker-compose.yml",
+        "kubernetes/deployment.yaml",
+        "kubernetes/service.yaml",
+        "scripts/build-docker.sh",
+        "scripts/check-bluetooth-host.sh",
+        "scripts/install-from-github.sh",
+        "scripts/install-systemd.sh",
+        "kubernetes/bluetooth-test-pod.yaml",
+        "systemd/ble-sensors-mqtt.service",
+    ):
+        if not any(name.endswith(required) for name in sdist_names):
+            fail(f"sdist is missing deployment asset: {required}")
 
 manifest = {}
 for artifact in sorted(wheels + sdists):

@@ -22,7 +22,11 @@ Prometheus e SNMP. Repository previsto: `desalvo/ble-sensors-mqtt`.
 - Prometheus e SNMPv2c read-only opzionali, con IP e porte configurabili;
 - `manufacturer`, `model` e `protocol` in ogni output, oltre a tutti i valori scalari
   disponibili nel decoder;
-- unità systemd irrobustita, test, lint, Bandit e audit dipendenze.
+- Home Assistant MQTT Discovery opzionale con configurazione retained e raggruppamento per device;
+- installer systemd irrobustito interattivo/non interattivo per funzionamento continuo;
+- asset Docker/Compose e Kubernetes multiarch per amd64/arm64;
+- pubblicazione CI delle immagini Docker Hub versionate sui tag e `latest` su `main`;
+- test, lint, Bandit, audit dipendenze e gate automatici di release;
 - logo applicativo PNG con sfondo trasparente, incluso nel manuale PDF.
 
 ## Sensori e modalità
@@ -120,6 +124,17 @@ BTHome richiede 16 byte; Xiaomi accetta chiavi da 12 o 16 byte. La chiave non va
 nella CLI o nei log.
 
 ## MQTT
+
+### Home Assistant MQTT Discovery
+
+Abilitare l'autodiscovery di Home Assistant con `--home-assistant-discovery`. Il gateway pubblica topic di configurazione retained sotto `homeassistant/` per default, mantenendo gli stati dei sensori sui normali topic `ble-sensors/.../state`. Tutti i valori scalari presenti nel payload del sensore vengono esposti come entità sensor di Home Assistant; le misure note ricevono device class, state class e unità, mentre RSSI e protocollo sono entità diagnostiche. Tutte le entità dello stesso sensore fisico/cloud vengono raggruppate in un singolo device Home Assistant con manufacturer/model. L'availability usa il topic retained di stato del bridge.
+
+```bash
+.venv/bin/ble-sensors-mqtt --mqtt-host 127.0.0.1 --home-assistant-discovery
+```
+
+Usare `--home-assistant-discovery-prefix PREFIX` se Home Assistant utilizza un prefisso discovery diverso dal default. I topic di configurazione discovery sono retained e quelli obsoleti vengono rimossi quando sensori/entità scompaiono o quando il discovery viene disabilitato, purché venga mantenuto il file di stato runtime.
+
 
 ```bash
 # Test, un solo ciclo
@@ -244,27 +259,35 @@ produzione impostare il PEN assegnato con `--snmp-base-oid`.
 
 ## systemd
 
+Installazione facile completa da clone GitHub, con prerequisiti host, verifica Bluetooth, venv e servizio:
+
 ```bash
-sudo scripts/install-systemd.sh
-sudo install -m 0640 -o root -g ble-sensors-mqtt /dev/null \
-  /etc/ble-sensors-mqtt/mqtt-password
-sudo editor /etc/ble-sensors-mqtt/mqtt-password
-sudo editor /etc/ble-sensors-mqtt/environment
-sudo systemctl enable --now ble-sensors-mqtt
-journalctl -u ble-sensors-mqtt -f
+git clone https://github.com/desalvo/ble-sensors-mqtt.git
+cd ble-sensors-mqtt
+sudo scripts/install-from-github.sh --mqtt-host mqtt.example.net --prometheus
 ```
 
-Esempio environment:
+Sono inoltre supportate installazione systemd interattiva e non presidiata; i valori CLI restano i default delle domande.
 
-```ini
-MQTT_HOST=mqtt.example.it
-MQTT_PORT=8883
-MQTT_USERNAME=sensor-publisher
-POLL_INTERVAL=30
-EXTRA_ARGS=--cloud-config /etc/ble-sensors-mqtt/cloud.toml --prometheus --snmp --snmp-community-file /etc/ble-sensors-mqtt/snmp-community
+```bash
+sudo scripts/install-systemd.sh --mqtt-host mqtt.example.net
+sudo scripts/install-systemd.sh --non-interactive --mqtt-host mqtt.example.net --mqtt-tls --prometheus
 ```
 
-Lo script crea l'utente non privilegiato, mantiene il codice applicativo root-owned, installa il runtime completo in una venv isolata e installa l'unità irrobustita. L'unità fornita richiede MQTT TLS verificato. In produzione non rimuovere TLS; la CLI rifiuta inoltre MQTT remoto o con credenziali in chiaro salvo override di rischio esplicito.
+Vedere `docs/SYSTEMD.it.md`.
+
+## Docker e Kubernetes
+
+Sono inclusi Docker/Compose multiarch `linux/amd64,linux/arm64` e manifest Kubernetes. Prima di usare BLE in container/pod eseguire `sudo scripts/check-bluetooth-host.sh --strict`; Docker e Kubernetes usano BlueZ host via `/run/dbus`, senza richiedere `privileged`.
+
+```bash
+docker login
+scripts/build-docker.sh
+cd docker && cp .env.example .env && cp arguments.example arguments && docker compose up -d
+kubectl apply -k kubernetes/
+```
+
+Vedere `docs/DOCKER.it.md` e `docs/KUBERNETES.it.md`. MQTT è uscente; Prometheus usa TCP/9105 e SNMP UDP/1161. L'esposizione esterna è opt-in.
 
 ## CLI completa
 
@@ -282,6 +305,8 @@ Lo script crea l'utente non privilegiato, mantiene il codice applicativo root-ow
 | `--device-name MAC=NOME` | radio | Alias BLE ripetibile |
 | `--sensor-name ID=NOME` | originale | Alias cloud/multi-canale |
 | `--mqtt-host HOST` | - | Broker MQTT |
+| `--home-assistant-discovery` | no | Pubblica configurazione Home Assistant MQTT Discovery |
+| `--home-assistant-discovery-prefix` | `homeassistant` | Prefisso discovery Home Assistant |
 | `--mqtt-port PORT` | 1883/8883 | Porta broker |
 | `--mqtt-topic-prefix` | `ble-sensors` | Radice topic |
 | `--mqtt-username` | - | Utente broker |

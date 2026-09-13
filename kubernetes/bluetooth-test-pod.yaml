@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ble-sensors-mqtt-bluetooth-test
+  labels:
+    app.kubernetes.io/name: ble-sensors-mqtt-bluetooth-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    ble-sensors-mqtt/bluetooth: "true"
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: bluetooth-test
+      image: desalvo/ble-sensors-mqtt:1.0.0
+      imagePullPolicy: IfNotPresent
+      command: ["ble-sensors-mqtt"]
+      args: ["--scan", "--scan-duration", "10"]
+      env:
+        - name: DBUS_SYSTEM_BUS_ADDRESS
+          value: unix:path=/run/dbus/system_bus_socket
+      volumeMounts:
+        - name: dbus
+          mountPath: /run/dbus
+          readOnly: true
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+  volumes:
+    - name: dbus
+      hostPath:
+        path: /run/dbus
+        type: Directory

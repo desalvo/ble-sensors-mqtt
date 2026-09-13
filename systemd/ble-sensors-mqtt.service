@@ -10,13 +10,12 @@ StartLimitBurst=5
 Type=simple
 User=ble-sensors-mqtt
 Group=ble-sensors-mqtt
-SupplementaryGroups=bluetooth
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=-/etc/ble-sensors-mqtt/environment
+Environment=DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
 StateDirectory=ble-sensors-mqtt
 StateDirectoryMode=0750
-ExecStart=/opt/ble-sensors-mqtt/.venv/bin/ble-sensors-mqtt --mqtt-host ${MQTT_HOST} --mqtt-port ${MQTT_PORT} --mqtt-username ${MQTT_USERNAME} --mqtt-password-file /etc/ble-sensors-mqtt/mqtt-password --poll-interval ${POLL_INTERVAL} --state-file /var/lib/ble-sensors-mqtt/state.json --mqtt-tls --mqtt-ca-file /etc/ssl/certs/ca-certificates.crt $EXTRA_ARGS
+ExecStart=/opt/ble-sensors-mqtt/.venv/bin/python /opt/ble-sensors-mqtt/scripts/systemd_launcher.py /etc/ble-sensors-mqtt/service-args.json
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=45s

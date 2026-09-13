@@ -34,6 +34,9 @@ def files() -> list[Path]:
         rel = path.relative_to(ROOT)
         if any(part in EXCLUDED_PARTS or part.endswith(".egg-info") for part in rel.parts):
             continue
+        rel_text = rel.as_posix()
+        if rel_text in {"docker/.env", "docker/arguments"} or rel_text.startswith("docker/secrets/"):
+            continue
         if path.is_file() and not path.is_symlink() and not path.name.endswith(".pyc"):
             result.append(path)
     return sorted(result, key=lambda item: item.relative_to(ROOT).as_posix())
