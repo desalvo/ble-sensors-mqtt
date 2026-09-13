@@ -1,6 +1,6 @@
 # ble-sensors-mqtt
 
-[English](README.en.md) · **Italiano**
+[English](README.md) · **Italiano**
 
 <img src="assets/ble-sensors-mqtt-logo.png" alt="Logo applicativo ble-sensors-mqtt" width="180">
 

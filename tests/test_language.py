@@ -7,7 +7,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_documentation_has_explicit_english_and_italian_pairs():
     pairs = (
-        ("README.en.md", "README.it.md"),
         ("SECURITY.en.md", "SECURITY.it.md"),
         ("CHANGELOG.en.md", "CHANGELOG.it.md"),
         ("docs/USAGE.en.md", "docs/USAGE.it.md"),
@@ -20,13 +19,15 @@ def test_documentation_has_explicit_english_and_italian_pairs():
         assert (ROOT / italian).is_file()
 
 
-def test_root_readme_is_language_selector_only():
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "README.en.md" in text
-    assert "README.it.md" in text
-    assert len(text.splitlines()) <= 8
-    assert "## Installation" not in text
-    assert "## Installazione" not in text
+def test_readmes_are_english_root_and_italian_translation():
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    italian = (ROOT / "README.it.md").read_text(encoding="utf-8")
+
+    assert (ROOT / "README.md").is_file()
+    assert (ROOT / "README.it.md").is_file()
+    assert not (ROOT / "README.en.md").exists()
+    assert "[Italiano](README.it.md)" in english
+    assert "[English](README.md)" in italian
 
 
 def test_cli_help_is_english():

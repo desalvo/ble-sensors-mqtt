@@ -162,6 +162,6 @@ Tuya Cloud:
 1. Create a Smart Home project in the Tuya IoT portal and link the mobile app account.
 2. Copy the Access ID, Access Secret, region, and one reference device ID.
 3. Store the ID and secret in separate files and run chmod 600 on each file.
-4. Create the TOML file shown in README.en.md and start with --cloud-config /path/cloud.toml.
+4. Create the TOML file shown in README.md and start with --cloud-config /path/cloud.toml.
 Tuya sensors advertising BTHome may instead work locally through the bthome plugin.
 """
