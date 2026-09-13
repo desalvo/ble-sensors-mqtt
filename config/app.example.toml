@@ -1,0 +1,87 @@
+[bluetooth]
+adapter = ""
+scan_duration = 8.0
+poll_interval = 30.0
+plugin_timeout = 15.0
+plugins = []
+devices = []
+device_names = []
+sensor_names = []
+
+[runtime]
+reuse_stale_data = false
+state_file = ""
+log_level = "INFO"
+
+[mqtt]
+host = ""
+port = 1883
+client_id = ""
+topic_prefix = "ble-sensors"
+username = ""
+password_file = ""
+tls = false
+ca_file = ""
+connect_timeout = 15.0
+allow_insecure = false
+retain = true
+qos = 1
+stale_cycles = 3
+home_assistant_discovery = false
+home_assistant_discovery_prefix = "homeassistant"
+
+[mqtt_cache]
+enabled = true
+path = ""
+max_size = "1GiB"
+
+[prometheus]
+enabled = false
+host = "127.0.0.1"
+port = 9105
+allow_external = false
+
+[snmp]
+enabled = false
+host = "127.0.0.1"
+port = 1161
+community_file = ""
+base_oid = "1.3.6.1.4.1.32473.1.1"
+allow_external = false
+
+[cloud]
+config_file = ""
+
+# Optional authenticated web frontend.
+[frontend]
+enabled = false
+host = "127.0.0.1"
+port = 8080
+allow_external = false
+data_dir = ""
+tls_cert = ""
+tls_key = ""
+
+# LDAP passwords are never stored by the application. Use either user_dn_template,
+# or a service bind plus base_dn/user_filter. bind_password_file must be protected.
+[frontend.ldap]
+enabled = false
+uri = "ldaps://ldap.example.org"
+bind_dn = ""
+bind_password_file = ""
+base_dn = "ou=people,dc=example,dc=org"
+user_filter = "(uid={username})"
+user_dn_template = ""
+default_role = "reader"
+start_tls = false
+
+# Generic OpenID Connect / OAuth2 SSO. The client secret is read from a protected file.
+[frontend.oidc]
+enabled = false
+name = "SSO"
+metadata_url = "https://idp.example.org/.well-known/openid-configuration"
+client_id = "ble-sensors-mqtt"
+client_secret_file = ""
+scopes = "openid profile email"
+username_claim = "preferred_username"
+default_role = "reader"

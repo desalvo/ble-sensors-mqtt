@@ -15,7 +15,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
 StateDirectory=ble-sensors-mqtt
 StateDirectoryMode=0750
-ExecStart=/opt/ble-sensors-mqtt/.venv/bin/python /opt/ble-sensors-mqtt/scripts/systemd_launcher.py /etc/ble-sensors-mqtt/service-args.json
+ExecStart=/opt/ble-sensors-mqtt/.venv/bin/ble-sensors-mqtt --config /etc/ble-sensors-mqtt/config.toml
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=45s

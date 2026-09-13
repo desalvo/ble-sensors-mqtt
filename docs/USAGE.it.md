@@ -1,5 +1,7 @@
 # Manuale di installazione e utilizzo
 
+
+> Host supportati: Linux x86_64/arm64 su Debian/Ubuntu/Raspberry Pi OS e RHEL/Rocky/AlmaLinux/CentOS/Fedora, oltre a Windows 11+ e macOS Tahoe 26+. Bluetooth interno e USB sono supportati tramite lo stack del sistema operativo. Vedere `HOSTS.it.md`.
 [English](USAGE.en.md) · **Italiano**
 
 ## 1. Scopo
@@ -110,32 +112,116 @@ dispositivi Tuya con firmware BTHome possono funzionare localmente.
 
 ## 7. Prometheus
 
+Abilitare l'exporter HTTP con:
+
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --prometheus
 curl http://127.0.0.1:9105/metrics
 ```
 
-Ogni serie ha label indirizzo, nome, marca, modello e protocollo. Le metriche storiche per
-temperatura, umidità, batteria e RSSI restano disponibili. Ogni altro numero/booleano usa
-`ble_sensors_sensor_value`; le stringhe usano `ble_sensors_sensor_info`.
+Il listener predefinito è `127.0.0.1:9105`. Un bind non-loopback richiede il consenso esplicito
+`--allow-external-prometheus`. L'endpoint non implementa autenticazione o TLS: per accesso esterno usare
+firewall, VPN oppure un reverse proxy autenticato.
+
+### Metriche Prometheus esposte
+
+| Metrica | Tipo | Label | Significato |
+| --- | --- | --- | --- |
+| `ble_sensors_up` | gauge | `address,name,manufacturer,model,protocol` | `1` per snapshot fresco, `0` quando lo snapshot esportato è riusato/stale |
+| `ble_sensors_stale` | gauge | stesse label sensore | `1` se lo snapshot proviene da un ciclo precedente, altrimenti `0` |
+| `ble_sensors_temperature_celsius` | gauge | stesse label sensore | valore numerico `temperature` trovato ricorsivamente, in gradi Celsius |
+| `ble_sensors_humidity_percent` | gauge | stesse label sensore | valore numerico `humidity` trovato ricorsivamente, in percentuale |
+| `ble_sensors_battery_percent` | gauge | stesse label sensore | valore numerico `battery` o `battery_percent` trovato ricorsivamente |
+| `ble_sensors_rssi_dbm` | gauge | stesse label sensore | RSSI Bluetooth top-level in dBm, se disponibile |
+| `ble_sensors_sensor_value` | gauge | label sensore + `key,unit` | ogni scalare numerico; i booleani sono esportati come `0`/`1` |
+| `ble_sensors_sensor_info` | gauge | label sensore + `key,unit,value` | ogni stringa non nulla, rappresentata da un campione costante pari a `1` |
+| `ble_sensors_devices` | gauge | nessuna | numero di snapshot attualmente esportati, inclusi eventuali snapshot stale riusati |
+| `ble_sensors_cycles_total` | counter | nessuna | cicli di polling tentati dal gateway |
+| `ble_sensors_cycles_failed_total` | counter | nessuna | cicli di polling marcati come falliti |
+
+Le metriche generiche derivano esclusivamente dall'oggetto normalizzato `data` del sensore. Dizionari
+annidati vengono appiattiti con path puntati, ad esempio `air.co2`; elementi di liste/tuple usano indici
+numerici come `channels.0`. La mappa riservata `data.units` non viene esportata come dato: quando presente,
+fornisce la label `unit` in base al nome della foglia. Vengono esportati al massimo 256 scalari per sensore.
+I valori `null` non vengono esportati in Prometheus.
+
+Le metriche dedicate temperatura/umidità/batteria e la metrica generica possono intenzionalmente esporre la
+stessa misura. I nomi dedicati semplificano dashboard stabili, mentre la famiglia generica preserva tutti i
+valori scalari forniti dai plugin. Poiché `ble_sensors_sensor_info` inserisce le stringhe nelle label, stringhe
+molto variabili possono aumentare la cardinalità Prometheus.
+
+Esempio:
+
+```text
+ble_sensors_up{address="AA:BB:CC:DD:EE:FF",name="Sala",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE"} 1
+ble_sensors_temperature_celsius{address="AA:BB:CC:DD:EE:FF",name="Sala",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE"} 21.5
+ble_sensors_sensor_value{address="AA:BB:CC:DD:EE:FF",name="Sala",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE",key="temperature",unit="°C"} 21.5
+```
+
+Lo stesso server HTTP espone anche `/healthz` e `/readyz`. `/healthz` indica la liveness del processo;
+`/readyz` restituisce HTTP 503 finché non completa con successo un ciclo e nuovamente quando l'ultimo ciclo
+riuscito diventa troppo vecchio.
 
 ```bash
 --prometheus --prometheus-host 0.0.0.0 --prometheus-port 9200 --allow-external-prometheus
 ```
 
-Default `127.0.0.1:9105`. `0.0.0.0`/`::` abilita accesso esterno se il firewall lo consente.
-L'endpoint non ha autenticazione/TLS: usare VPN, reverse proxy o ACL di rete.
-
 ## 8. SNMP
+
+Abilitare l'agente SNMPv2c read-only con un file community protetto:
 
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --snmp \
   --snmp-community-file /etc/ble-sensors-mqtt/snmp-community
 ```
 
-Default `127.0.0.1:1161`. Usare `--snmp-host 0.0.0.0 --allow-external-snmp`/`::` e `--snmp-port` per accesso
-esterno. La tabella `.10` include marca, modello e protocollo; `.20` espone ogni scalare come
-chiave, valore, tipo e unità. SNMPv2c non cifra: limitare UDP o usare VPN/proxy SNMPv3.
+Il listener predefinito è `127.0.0.1:1161/udp`. Il bind non-loopback richiede
+`--allow-external-snmp`. SNMPv2c non cifra community o payload: limitare l'accesso UDP oppure usare una
+VPN/proxy SNMPv3.
+
+Con il default `--snmp-base-oid 1.3.6.1.4.1.32473.1.1`, l'albero esportato è:
+
+| Suffisso OID | Oggetto MIB | Tipo | Significato |
+| --- | --- | --- | --- |
+| `.1.0` | `bleSensorsVersion` | DisplayString | identificazione/versione applicazione |
+| `.2.0` | `bleSensorsDeviceCount` | Gauge32 | numero di snapshot attualmente esportati |
+| `.10.1.1.I` | `bleSensorsIndex` | Integer32 | indice transitorio riga dispositivo |
+| `.10.1.2.I` | `bleSensorsAddress` | DisplayString | identificatore/indirizzo normalizzato sensore |
+| `.10.1.3.I` | `bleSensorsName` | DisplayString | nome/alias effettivo del sensore |
+| `.10.1.4.I` | `bleSensorsRssi` | Integer32 | RSSI in dBm, omesso se non disponibile |
+| `.10.1.5.I` | `bleSensorsTemperatureMilliCelsius` | Integer32 | temperatura moltiplicata per 1000 |
+| `.10.1.6.I` | `bleSensorsHumidityMilliPercent` | Gauge32 | umidità relativa moltiplicata per 1000 |
+| `.10.1.7.I` | `bleSensorsBatteryPercent` | Gauge32 | percentuale batteria arrotondata all'intero |
+| `.10.1.8.I` | `bleSensorsObservedAt` | DisplayString | timestamp originale dell'osservazione |
+| `.10.1.9.I` | `bleSensorsManufacturer` | DisplayString | produttore, oppure `Unknown` |
+| `.10.1.10.I` | `bleSensorsModel` | DisplayString | modello, oppure `Unknown` |
+| `.10.1.11.I` | `bleSensorsProtocol` | DisplayString | protocollo, oppure `Unknown` |
+| `.10.1.12.I` | `bleSensorsStale` | Gauge32 | `1` per dato riusato/stale, altrimenti `0` |
+| `.20.1.1.I.J` | `bleSensorsValueKey` | DisplayString | chiave/path scalare appiattito |
+| `.20.1.2.I.J` | `bleSensorsValue` | DisplayString | scalare reso come testo |
+| `.20.1.3.I.J` | `bleSensorsValueType` | DisplayString | `null`, `boolean`, `number` o `string` |
+| `.20.1.4.I.J` | `bleSensorsValueUnit` | DisplayString | unità da `data.units`, se disponibile |
+| `.20.1.5.I.J` | `bleSensorsValueDeviceIndex` | Integer32 | indice dispositivo `I` |
+| `.20.1.6.I.J` | `bleSensorsValueIndex` | Integer32 | indice scalare `J` |
+
+Le righe `.10` sono ordinate per identificatore normalizzato del sensore: l'indice `I` è quindi transitorio e
+può cambiare quando cambia l'insieme dei dispositivi esportati. Le colonne opzionali delle misure comuni non
+esistono quando il valore non è disponibile. La tabella `.20` contiene fino a 256 valori scalari per ogni
+oggetto `data` e usa le stesse regole di flattening di Prometheus. I campi testuali SNMP sono limitati
+dall'agente a 512 byte codificati.
+
+La MIB testuale inclusa è `docs/BLE-SENSORS-MQTT-MIB.txt`. Il PEN `32473` è solo documentativo. In
+produzione usare un enterprise OID assegnato con `--snmp-base-oid`. Cambiando il base OID viene spostato lo
+stesso layout di suffissi mostrato sopra; la MIB testuale inclusa continua invece a nominare la radice
+documentativa predefinita.
+
+Esempi di walk:
+
+```bash
+snmpwalk -v2c -c COMMUNITY_CASUALE 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1
+snmpwalk -v2c -c COMMUNITY_CASUALE 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1.10
+snmpwalk -v2c -c COMMUNITY_CASUALE 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1.20
+```
 
 ## 9. systemd
 
@@ -160,7 +246,7 @@ sudo scripts/install-systemd.sh --non-interactive \
   --home-assistant-discovery --prometheus
 ```
 
-L'installer crea utente di servizio, venv isolata, configurazione root-owned e `/etc/ble-sensors-mqtt/service-args.json`; argomenti ripetuti e valori con spazi sono preservati senza parsing shell. In modalità interattiva i valori CLI restano i default mostrati dal wizard e le opzioni ripetibili già passate vengono mantenute. Con `--non-interactive` l'installazione usa esclusivamente valori CLI/default. Vedere `docs/SYSTEMD.it.md`.
+L'installer crea utente di servizio, venv isolata, configurazione root-owned e `/etc/ble-sensors-mqtt/config.toml`; le opzioni ripetibili sono salvate come array TOML e i valori con spazi sono preservati senza parsing shell. In modalità interattiva i valori CLI restano i default mostrati dal wizard e le opzioni ripetibili già passate vengono mantenute. Con `--non-interactive` l'installazione usa esclusivamente valori CLI/default. Vedere `docs/SYSTEMD.it.md`.
 
 ## 10. Docker e Kubernetes
 
@@ -238,3 +324,12 @@ scripts/release-check.sh
 Il gate richiede lint, test/coverage, Bandit, audit dipendenze, generazione PDF EN/IT, build wheel e sdist, `twine check`, SBOM CycloneDX e verifica del pacchetto di release. La CI ripete i test runtime su Python 3.11, 3.12 e 3.13.
 
 Per la pubblicazione su GitHub, eseguire prima il push del commit sorgente e poi il push di un tag `vX.Y.Z` corrispondente. Il workflow del tag esegue tutti i gate, costruisce gli artefatti deterministici di release, crea checksum SHA-256 consolidati e pubblica automaticamente la GitHub Release soltanto dopo il successo dei job di test e build. Il job di release verifica che la versione del tag corrisponda a `VERSION` e `pyproject.toml`.
+
+## Fallback stale e cache MQTT persistente
+
+Usare `--reuse-stale-data` per mantenere l’ultimo snapshot in memoria quando un ciclo non rileva il sensore o non produce dati. Gli snapshot riusati conservano il timestamp originale e impostano `stale: true`; quelli freschi impostano `stale: false`. Lo spool MQTT SQLite è attivo per default, ha limite logico 1 GiB, continua ad accodare durante l’indisponibilità del broker, viene svuotato FIFO alla riconnessione e rimuove i record solo dopo ACK MQTT. Configurare con `--mqtt-cache-path PATH`, `--mqtt-cache-max-size SIZE` o `--no-mqtt-cache`.
+
+## Frontend web opzionale
+
+Abilitare la console web autenticata con `--frontend` dopo aver installato `.[web]` oppure `.[all]`. Il bind default è `127.0.0.1:8080`; usare `--allow-external-frontend` per indirizzi non-loopback e proteggere gli accessi remoti con HTTPS o reverse proxy TLS. Le credenziali iniziali sono `admin` / `password`, con cambio password obbligatorio al primo login. La console offre stato sensori responsive desktop/mobile, autorizzazione admin/reader, configurazione runtime persistente, autenticazione locale/LDAP/OIDC, MFA TOTP per utenti locali/LDAP, gestione utenti e import/export cifrato di configurazione e cache/stato disponibili. Dettagli in `docs/FRONTEND.it.md`.
+

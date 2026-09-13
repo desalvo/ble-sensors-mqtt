@@ -23,6 +23,9 @@ MQTT, Prometheus, and SNMP. Intended repository: `desalvo/ble-sensors-mqtt`.
 - `manufacturer`, `model`, and `protocol` in every output, plus all scalar values returned by
   the decoder;
 - optional Home Assistant MQTT Discovery with retained configuration and device grouping;
+- first-class presence/motion/occupancy/moving semantics across Home Assistant, Prometheus and SNMP;
+- optional stale-reading reuse, marking reused snapshots with `stale: true`;
+- persistent bounded SQLite MQTT cache (1 GiB by default) for broker outages;
 - interactive/non-interactive hardened systemd installer for unattended daemon operation;
 - multiarch Docker/Compose and Kubernetes deployment assets for amd64/arm64;
 - CI publication of versioned Docker Hub images on release tags and `latest` on `main`;
@@ -52,6 +55,12 @@ keys or the cloud. `--list-plugins` reports the adapters available in the curren
 The vendor app is unnecessary for clear-text BLE advertisements and may coexist with this
 gateway. It may be required to pair cloud devices or obtain encryption keys.
 
+## Supported hosts
+
+Linux x86_64/arm64 is supported on Debian-family and Red Hat-family distributions, with either internal Bluetooth or a USB Bluetooth dongle managed by BlueZ. Windows 11+ and macOS Tahoe 26+ are also supported through native Bleak backends; tagged releases build native CI bundles. See [`docs/HOSTS.en.md`](docs/HOSTS.en.md).
+
+On Linux with multiple controllers use `--bluetooth-adapter hci1`; on Windows/macOS the operating system selects the controller.
+
 ## Install in a Python virtual environment
 
 Requirements: Raspberry Pi OS Bookworm, Python 3.11+, BlueZ, and a reachable MQTT broker.
@@ -72,7 +81,8 @@ Choose one profile:
 .venv/bin/pip install .             # SwitchBot only; lightest option
 .venv/bin/pip install '.[sensors]'  # all BLE decoders
 .venv/bin/pip install '.[cloud]'    # SwitchBot and Tuya Cloud
-.venv/bin/pip install '.[all]'      # all BLE decoders and Tuya Cloud
+.venv/bin/pip install '.[web]'      # authenticated browser frontend
+.venv/bin/pip install '.[all]'      # all BLE/cloud decoders plus web frontend
 ```
 
 ```bash
@@ -127,13 +137,21 @@ line or in logs.
 
 ### Home Assistant MQTT Discovery
 
-Enable Home Assistant autodiscovery with `--home-assistant-discovery`. The gateway publishes retained configuration topics under `homeassistant/` by default while keeping sensor state on the normal `ble-sensors/.../state` topics. All scalar values found in a sensor payload are exposed as Home Assistant sensor entities; known measurements receive device classes, state classes, and units, while RSSI and protocol are diagnostic entities. All entities from the same physical/cloud sensor are grouped into one Home Assistant device with manufacturer/model metadata. Availability follows the retained bridge status topic.
+Enable Home Assistant autodiscovery with `--home-assistant-discovery`. The gateway publishes retained configuration topics under `homeassistant/` by default while keeping sensor state on the normal `ble-sensors/.../state` topics. Scalar measurements become Home Assistant `sensor` entities; recognized presence, motion, occupancy, and moving values become proper `binary_sensor` entities with the matching device class. Known measurements receive device/state classes and units, while RSSI, protocol, and stale status are diagnostic entities. All entities from the same physical/cloud sensor are grouped into one Home Assistant device with manufacturer/model metadata. Availability follows the retained bridge status topic.
+
+Presence semantics are recognized from common decoder/vendor keys including BTHome `presence`, `motion`, `occupancy`, and `moving`, plus aliases such as SwitchBot `Detected`, `moveDetected`, and `detectionState`. The original plugin field remains unchanged in MQTT and in the generic exporters.
 
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 127.0.0.1 --home-assistant-discovery
 ```
 
 Use `--home-assistant-discovery-prefix PREFIX` if Home Assistant uses a non-default discovery prefix. Discovery config topics are retained and stale config topics are cleared when sensors/entities disappear or discovery is disabled, provided the runtime state file is preserved.
+
+### Stale readings and MQTT outage cache
+
+With `--reuse-stale-data`, a sensor that is not detected in a polling cycle, or returns an empty `data` object, reuses its last in-memory reading. Reused snapshots preserve the original `observed_at` and add `"stale": true`; fresh snapshots add `"stale": false`. Prometheus exposes `ble_sensors_stale` and sets `ble_sensors_up=0` for reused data.
+
+The MQTT disk cache is enabled by default. If the broker is unavailable at startup or disconnects later, polling continues and MQTT messages are appended transactionally to SQLite. The default maximum logical size is 1 GiB; when full, the oldest queued messages are discarded to make room for the newest data. After reconnection, queued messages are sent FIFO and removed only after publish acknowledgement. Use `--mqtt-cache-path`, `--mqtt-cache-max-size`, or `--no-mqtt-cache` to customize it. When `--state-file` is set, the default cache file is `mqtt-cache.sqlite3` in the same directory.
 
 
 ```bash
@@ -202,19 +220,34 @@ HTTPS; review the service privacy notice, data location, and terms.
 curl http://127.0.0.1:9105/metrics
 ```
 
-The exporter provides `ble_sensors_up`, `ble_sensors_temperature_celsius`,
-`ble_sensors_humidity_percent`, `ble_sensors_battery_percent`, `ble_sensors_rssi_dbm`, and
-`ble_sensors_devices`. Generic numbers/booleans use `ble_sensors_sensor_value`; strings use
-`ble_sensors_sensor_info`. Sensor series include `address`, `name`, `manufacturer`, `model`,
-and `protocol` labels.
+The exporter exposes the following metric families:
 
-```bash
-# All IPv4 interfaces, custom port
-.venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --prometheus \
-  --prometheus-host 0.0.0.0 --prometheus-port 9200 --allow-external-prometheus
-```
+| Metric | Type | Main labels / meaning |
+| --- | --- | --- |
+| `ble_sensors_up` | gauge | sensor identity labels; `1` fresh, `0` stale/reused |
+| `ble_sensors_stale` | gauge | sensor identity labels; inverse freshness indicator |
+| `ble_sensors_temperature_celsius` | gauge | recursively discovered `temperature` |
+| `ble_sensors_humidity_percent` | gauge | recursively discovered `humidity` |
+| `ble_sensors_battery_percent` | gauge | `battery` or `battery_percent` |
+| `ble_sensors_rssi_dbm` | gauge | top-level RSSI in dBm |
+| `ble_sensors_presence` | gauge | recognized human/person presence, `1` present and `0` absent |
+| `ble_sensors_motion` | gauge | recognized motion state, `1` detected and `0` clear |
+| `ble_sensors_occupancy` | gauge | recognized occupancy state, `1` occupied and `0` unoccupied |
+| `ble_sensors_moving` | gauge | recognized moving state, `1` moving and `0` stationary |
+| `ble_sensors_sensor_value` | gauge | identity + `key,unit`; all numeric/boolean `data` scalars |
+| `ble_sensors_sensor_info` | gauge | identity + `key,unit,value`; all string `data` scalars, sample value `1` |
+| `ble_sensors_devices` | gauge | current exported snapshot count |
+| `ble_sensors_cycles_total` | counter | polling cycles attempted |
+| `ble_sensors_cycles_failed_total` | counter | failed polling cycles |
 
-The default is `127.0.0.1:9105`; use `::` for IPv6. `/healthz` reports process liveness and `/readyz` returns HTTP 200 only after a recent successful polling cycle. The endpoint has no authentication or TLS, therefore a non-loopback bind is rejected unless `--allow-external-prometheus` is explicitly supplied. Protect external access with a firewall, VPN, or authenticated reverse proxy.
+Sensor identity labels are `address`, `name`, `manufacturer`, `model`, and `protocol`. Generic keys are
+flattened dotted paths from `data`; booleans become `0`/`1`, `null` is omitted, and up to 256 scalar values
+per sensor are exported. The reserved `data.units` map supplies the `unit` label and is not itself exported.
+See `docs/USAGE.en.md` for the complete metric contract and examples.
+
+The default is `127.0.0.1:9105`; use `::` for IPv6. `/healthz` reports liveness and `/readyz` reports
+readiness. A non-loopback bind requires `--allow-external-prometheus`; the endpoint has no built-in TLS or
+authentication.
 
 ## SNMP
 
@@ -227,19 +260,14 @@ sudo chmod 0640 /etc/ble-sensors-mqtt/snmp-community
 snmpwalk -v2c -c RANDOM_COMMUNITY 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1
 ```
 
-The device table includes name, address, RSSI, common measurements, timestamp, manufacturer,
-model, and protocol. Subtree `.20` exposes each scalar as key, value, type, and unit. See
-`docs/BLE-SENSORS-MQTT-MIB.txt`.
+At the default base OID, `.1.0` identifies the application, `.2.0` reports the exported device count,
+`.10.1` is the common device table (identity, RSSI, temperature, humidity, battery, timestamp, stale,
+presence, motion, occupancy and moving), and `.20.1` is the generic scalar table (`key`, text-rendered value, type, unit, device index and
+scalar index). The generic table contains up to 256 `data` scalars per sensor. Device indexes are transient.
+The exact OID/type contract is documented in `docs/BLE-SENSORS-MQTT-MIB.txt` and `docs/USAGE.en.md`.
 
-```bash
-# All IPv4 interfaces, custom port
-.venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --snmp \
-  --snmp-host 0.0.0.0 --snmp-port 2161 --allow-external-snmp \
-  --snmp-community-file /etc/ble-sensors-mqtt/snmp-community
-```
-
-The default is `127.0.0.1:1161`; `::` exposes IPv6. A non-loopback bind is rejected unless `--allow-external-snmp` is explicitly supplied. SNMPv2c does not encrypt traffic: never publish it directly to the Internet. Use firewall rules, a VPN, or an SNMPv3 proxy. PEN 32473
-is documentation-only; set an assigned enterprise OID with `--snmp-base-oid` in production.
+The default listener is `127.0.0.1:1161/udp`; non-loopback binding requires `--allow-external-snmp`.
+SNMPv2c is clear text. PEN 32473 is documentation-only; use an assigned `--snmp-base-oid` in production.
 
 ## systemd
 
@@ -277,12 +305,14 @@ See `docs/DOCKER.en.md` and `docs/KUBERNETES.en.md`. MQTT is outbound; Prometheu
 
 | Option | Default | Purpose |
 | --- | ---: | --- |
+| `--config FILE` | native path | Persistent TOML configuration; explicit CLI options override it |
 | `--scan` | off | Print recognized sensors and exit |
 | `--list-plugins` | off | Show plugin and dependency status |
 | `--plugin NAME` | all installed | Restrict plugins; repeatable |
 | `--cloud-help` | off | Show Tuya setup instructions |
 | `--cloud-config FILE` | none | Protected TOML configuration |
 | `--scan-duration S` | 8 | BLE scan duration |
+| `--bluetooth-adapter ADAPTER` | OS default | Linux BlueZ controller (e.g. `hci1`) |
 | `--poll-interval S` | 30 | Poll interval, 1–86400 seconds |
 | `--plugin-timeout S` | 15 | Maximum decoder/cloud call duration |
 | `--device ID` | all | Repeatable sensor allow-list (BLE MAC or cloud/plugin ID) |
@@ -297,6 +327,10 @@ See `docs/DOCKER.en.md` and `docs/KUBERNETES.en.md`. MQTT is outbound; Prometheu
 | `--mqtt-password-file` | none | Password in a protected file |
 | `--mqtt-tls` | off | TLS with certificate verification |
 | `--mqtt-connect-timeout S` | 15 | CONNACK/publish acknowledgement timeout |
+| `--mqtt-cache` / `--no-mqtt-cache` | enabled | Persist unsent MQTT messages on disk |
+| `--mqtt-cache-path FILE` | beside state file/user state dir | SQLite spool path |
+| `--mqtt-cache-max-size SIZE` | `1GiB` | Bounded logical spool size; accepts bytes/KiB/MiB/GiB/TiB |
+| `--reuse-stale-data` | off | Reuse previous sensor data with `stale: true` when a sensor is missing or empty |
 | `--allow-insecure-mqtt` | off | Explicit plaintext MQTT risk override |
 | `--qos` | 1 | QoS 0, 1, or 2 |
 | `--retain` / `--no-retain` | retain | Retained sensor state |
@@ -341,6 +375,11 @@ The cloud class/factory is constructed as `AcmeCloudPlugin(config, read_secret)`
 `config_key` to select a different table. Cloud failures are isolated from BLE and from other
 cloud providers.
 
+
+## Optional authenticated web frontend
+
+Install `.[web]` (or `.[all]`) and enable `--frontend` for a professional responsive browser console. It shows the live/stale status and normalized values of every exported sensor, supports admin/reader roles, persistent runtime configuration, local users, LDAP, generic OIDC SSO, portable TOTP MFA for local/LDAP users, and encrypted full backup/restore including configuration, user/MFA state and MQTT cache. The bootstrap account is `admin` / `password` and must change its password at first login. Browser-persisted settings are stored in a writable runtime override so protected `/etc`/Kubernetes configuration can remain read-only. See `docs/FRONTEND.en.md`.
+
 ## Security, AgID alignment, and limitations
 
 The project applies least privilege, verified TLS, secrets outside command lines and
@@ -369,3 +408,9 @@ The Prometheus HTTP server exposes `/metrics`, `/healthz`, and `/readyz`. Readin
 A production release must pass `scripts/release-check.sh`. The gate runs compilation, Ruff, pytest with coverage, Bandit, `pip-audit`, both PDF manual builds, standard wheel/sdist creation, `twine check`, CycloneDX SBOM generation, and release-content verification. CI executes the runtime suite on Python 3.11, 3.12, and 3.13 with all optional sensor/cloud dependencies. See `docs/PRODUCTION.en.md`.
 
 GitHub Actions also automates publication. A pushed tag such as `v1.0.0` triggers the complete test/build pipeline; only after every gate succeeds does the `release` job verify that the tag matches both `VERSION` and `pyproject.toml`, download the CI-built artifacts, and create or update the corresponding GitHub Release. The release contains wheel, sdist, SBOM, deterministic project archives, SHA-256 checksums, and the separate EN/IT manuals. No personal GitHub token is required: the job uses the repository-scoped `GITHUB_TOKEN` with `contents: write` only for the release job.
+
+### Installer component selection and release checks
+
+The interactive Linux installer starts by asking which optional dependency groups to install: additional BLE sensor decoders (`sensors`), cloud providers (`cloud`), and the authenticated web frontend (`web`). For unattended installs use the corresponding `--with-*`/`--without-*` switches. Windows/macOS graphical installers expose OS components (runtime, background service/agent, Settings GUI); runtime integrations are then enabled from Settings/configuration.
+
+`scripts/release-check.sh` bootstraps `.[all,dev,release]` by default so tools such as Ruff and ReportLab are present even for a manual release check. Set `BLE_SENSORS_RELEASE_SKIP_BOOTSTRAP=1` only in a pre-provisioned/offline environment.

@@ -64,3 +64,66 @@ def test_snmp_mib_contains_identity_and_every_scalar():
     blob = b"".join(table.values())
     for text in (b"SwitchBot", b"Meter Plus", b"SwitchBot BLE", b"temperature", b"humidity", b"battery"):
         assert text in blob
+
+
+def test_prometheus_marks_reused_sensor_as_stale():
+    from ble_sensors_mqtt.metrics import SensorStore
+    from ble_sensors_mqtt.prometheus import render
+
+    store = SensorStore()
+    store.replace({
+        "AA:BB:CC:DD:EE:FF": {
+            "name": "Room", "manufacturer": "Vendor", "model": "M", "protocol": "BLE",
+            "stale": True, "data": {"temperature": 21.0},
+        }
+    })
+    text = render(store).decode()
+    assert "ble_sensors_up{" in text and "} 0" in text
+    assert "ble_sensors_stale{" in text and "} 1" in text
+
+
+def test_snmp_generic_index_columns_are_integer32():
+    base = parse_oid("1.3.6.1.4.1.32473.1.1")
+    table = mib(populated_store(), base)
+    # BER tag 0x02 = INTEGER. The MIB declares columns 5 and 6 as Integer32.
+    assert table[base + (20, 1, 5, 1, 1)][0] == 0x02
+    assert table[base + (20, 1, 6, 1, 1)][0] == 0x02
+
+
+def presence_store():
+    store = SensorStore()
+    store.replace({
+        "11:22:33:44:55:66": {
+            "name": "Presence Sensor",
+            "manufacturer": "SwitchBot",
+            "model": "Presence Sensor",
+            "protocol": "SwitchBot BLE",
+            "rssi": -50,
+            "data": {
+                "Detected": True,
+                "moveDetected": False,
+                "occupancy": 1,
+                "moving": "off",
+            },
+        }
+    })
+    return store
+
+
+def test_prometheus_exposes_presence_family_metrics():
+    body = render(presence_store()).decode()
+    assert "ble_sensors_presence{" in body and "} 1" in body
+    assert "ble_sensors_motion{" in body and "} 0" in body
+    assert "ble_sensors_occupancy{" in body and "} 1" in body
+    assert "ble_sensors_moving{" in body and "} 0" in body
+    # Original vendor fields remain available through the generic scalar exporter.
+    assert 'key="Detected"' in body
+    assert 'key="moveDetected"' in body
+
+
+def test_snmp_exposes_presence_family_common_columns():
+    base = parse_oid("1.3.6.1.4.1.32473.1.1")
+    table = mib(presence_store(), base)
+    for column in (13, 14, 15, 16):
+        assert base + (10, 1, column, 1) in table
+        assert table[base + (10, 1, column, 1)][0] == 0x42

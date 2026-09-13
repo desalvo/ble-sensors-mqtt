@@ -114,3 +114,10 @@ def test_sensor_identifier_accepts_ble_and_cloud_ids():
 def test_device_option_accepts_cloud_identifier():
     args = parser().parse_args(["--mqtt-host", "127.0.0.1", "--device", "tuya:abc123"])
     assert args.device == ["TUYA:ABC123"]
+
+
+def test_linux_bluetooth_adapter_option_is_parsed():
+    args = parser().parse_args([
+        "--scan", "--bluetooth-adapter", "hci1",
+    ])
+    assert args.bluetooth_adapter == "hci1"

@@ -11,7 +11,10 @@ installer_args=()
 
 usage() {
   cat <<'HELP'
-Easy bootstrap installer for ble-sensors-mqtt.
+Easy bootstrap installer for ble-sensors-mqtt on systemd Linux hosts.
+
+Supported package-manager families include Debian/Ubuntu/Raspberry Pi OS and
+RHEL/Rocky/AlmaLinux/CentOS/Fedora. Both x86_64 and ARM64 hosts are supported.
 
 It installs common host prerequisites, uses the current Git clone when run
 inside one (otherwise clones/updates GitHub), checks host Bluetooth/BlueZ
@@ -30,13 +33,16 @@ Bootstrap options:
   --help
 
 All unrecognised options and all arguments after -- are passed unchanged to
-scripts/install-systemd.sh. Therefore interactive mode is the default and CLI
-values remain the wizard defaults. Pass --non-interactive to install-systemd
-for unattended provisioning.
+scripts/install-systemd.sh. Therefore interactive mode is the default and starts
+by asking which optional components to install: BLE sensor decoder packs, cloud
+providers and the authenticated web frontend. CLI values remain the wizard
+defaults. Pass --non-interactive together with --with/--without-sensors,
+--with/--without-cloud and --with/--without-web for unattended provisioning.
 
 Examples:
   sudo scripts/install-from-github.sh --mqtt-host mqtt.example.net --prometheus
   sudo scripts/install-from-github.sh --ref v1.0.0 --non-interactive \
+    --with-sensors --without-cloud --with-web \
     --mqtt-host mqtt.example.net --mqtt-tls --home-assistant-discovery
 HELP
 }
@@ -63,13 +69,13 @@ install_deps() {
   if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y git python3 python3-venv python3-pip bluez rfkill dbus
+    apt-get install -y git python3 python3-venv python3-pip bluez rfkill dbus usbutils
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y git python3 python3-pip bluez rfkill dbus
+    dnf install -y git python3 python3-pip bluez rfkill dbus usbutils
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y git python3 python3-pip bluez rfkill dbus
+    yum install -y git python3 python3-pip bluez rfkill dbus usbutils
   else
-    echo 'Unsupported package manager. Install git, Python >=3.11 with venv, BlueZ, rfkill and D-Bus, then rerun with --skip-system-deps.' >&2
+    echo 'Unsupported package manager. Install git, Python >=3.11 with venv, BlueZ, rfkill, D-Bus and (optionally) usbutils, then rerun with --skip-system-deps.' >&2
     exit 2
   fi
 }

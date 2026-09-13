@@ -172,3 +172,104 @@ def test_sync_plugin_decode_is_timeout_bounded(monkeypatch):
     result, elapsed = asyncio.run(run_once())
     assert result == []
     assert elapsed < 0.18
+
+
+def test_stale_reuse_cli_and_payload_behavior():
+    from ble_sensors_mqtt.cli import apply_stale_fallback
+
+    args = parser().parse_args(["--mqtt-host", "127.0.0.1", "--reuse-stale-data"])
+    assert args.reuse_stale_data is True
+
+    previous = {
+        "AA:BB:CC:DD:EE:FF": {
+            "address": "AA:BB:CC:DD:EE:FF",
+            "name": "Room",
+            "observed_at": "2026-09-13T00:00:00+00:00",
+            "data": {"temperature": 22.5},
+        }
+    }
+    reused = apply_stale_fallback({}, previous, True)
+    assert reused["AA:BB:CC:DD:EE:FF"]["stale"] is True
+    assert reused["AA:BB:CC:DD:EE:FF"]["data"]["temperature"] == 22.5
+    assert reused["AA:BB:CC:DD:EE:FF"]["observed_at"] == "2026-09-13T00:00:00+00:00"
+
+    fresh = apply_stale_fallback(
+        {
+            "AA:BB:CC:DD:EE:FF": {
+                "address": "AA:BB:CC:DD:EE:FF",
+                "data": {"temperature": 23.0},
+            }
+        },
+        previous,
+        True,
+    )
+    assert fresh["AA:BB:CC:DD:EE:FF"]["stale"] is False
+    assert fresh["AA:BB:CC:DD:EE:FF"]["data"]["temperature"] == 23.0
+
+    disabled = apply_stale_fallback({}, previous, False)
+    assert disabled == {}
+
+
+def test_mqtt_cache_is_bounded_fifo_and_private(tmp_path):
+    from ble_sensors_mqtt.mqtt_cache import MQTTCache
+
+    path = tmp_path / "mqtt-cache.sqlite3"
+    cache = MQTTCache(path, 1_048_576)
+    try:
+        assert path.stat().st_mode & 0o777 == 0o600
+        cache.enqueue("a/topic", b"one", 1, True)
+        cache.enqueue("b/topic", b"two", 0, False)
+        messages = cache.oldest()
+        assert [item.topic for item in messages] == ["a/topic", "b/topic"]
+        assert messages[0].payload == b"one"
+        cache.delete(messages[0].id)
+        assert [item.topic for item in cache.oldest()] == ["b/topic"]
+    finally:
+        cache.close()
+
+
+def test_mqtt_cache_cli_defaults_and_size_parser(tmp_path):
+    from ble_sensors_mqtt.cli import byte_size, mqtt_cache_path
+
+    assert byte_size("1GiB") == 1024**3
+    assert byte_size("500MB") == 500_000_000
+    args = parser().parse_args([
+        "--mqtt-host", "127.0.0.1",
+        "--state-file", str(tmp_path / "state.json"),
+    ])
+    assert args.mqtt_cache is True
+    assert args.mqtt_cache_max_size == 1024**3
+    assert mqtt_cache_path(args) == tmp_path / "mqtt-cache.sqlite3"
+
+
+def test_linux_adapter_is_forwarded_to_bleak(monkeypatch):
+    import sys
+    import types
+
+    from ble_sensors_mqtt import scanner as scanner_module
+
+    captured = {}
+
+    class FakeScanner:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+    fake_bleak = types.SimpleNamespace(BleakScanner=FakeScanner)
+    monkeypatch.setitem(sys.modules, "bleak", fake_bleak)
+    monkeypatch.setattr(scanner_module.sys, "platform", "linux")
+
+    class Plugin:
+        name = "dummy"
+
+        def decode(self, _device, _advertisement):
+            return []
+
+    import asyncio
+    assert asyncio.run(scanner_module.scan(0.001, [Plugin()], adapter="hci1")) == []
+    assert captured["bluez"] == {"adapter": "hci1"}

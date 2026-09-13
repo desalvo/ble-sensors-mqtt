@@ -150,3 +150,15 @@ kubectl rollout status deployment/ble-sensors-mqtt
 ```
 
 Per seguire lo sviluppo su `main` è possibile usare `desalvo/ble-sensors-mqtt:latest`, ma in produzione sono raccomandati tag di versione immutabili. Con `latest`, impostare `imagePullPolicy: Always`.
+
+## Cache durante indisponibilità MQTT
+
+La ConfigMap predefinita abilita la cache MQTT in `/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3` con limite logico 1 GiB. La cache risiede sul PVC esistente. Impostare `REUSE_STALE_DATA=true` per mantenere le letture precedenti quando un sensore manca temporaneamente.
+
+## Più controller Bluetooth sullo stesso nodo
+
+Impostare `BLUETOOTH_ADAPTER` in `kubernetes/configmap.yaml` a un controller BlueZ come `hci1` quando il nodo Linux selezionato ha più controller. Lasciarlo vuoto per il default del sistema operativo. È utile sui nodi con adattatore interno e dongle Bluetooth USB.
+
+## Frontend autenticato
+
+Impostare `FRONTEND_ENABLED: "true"` nella ConfigMap per abilitare il frontend. Stato persistente e override runtime usano il PVC già montato su `/var/lib/ble-sensors-mqtt`. Il Service ClusterIP di default espone internamente TCP/8080. `kubernetes/service-frontend-external.yaml` è un esempio LoadBalancer esplicitamente opt-in; in produzione preferire Ingress/reverse proxy HTTPS e limitare l'accesso di rete. Vedere `FRONTEND.it.md`.

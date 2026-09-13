@@ -28,6 +28,17 @@ ok() { [[ $quiet == true ]] || printf '[OK] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; warnings=$((warnings + 1)); }
 fail() { printf '[FAIL] %s\n' "$*" >&2; failures=$((failures + 1)); }
 
+[[ $quiet == true ]] || printf '[INFO] architecture: %s\n' "$(uname -m 2>/dev/null || echo unknown)"
+if command -v lsusb >/dev/null 2>&1; then
+  usb_bt=$(lsusb 2>/dev/null | grep -Ei 'bluetooth|wireless.*(bluetooth|bt)|bt[[:space:]]' || true)
+  if [[ -n $usb_bt ]]; then
+    ok 'USB Bluetooth candidate(s) detected by lsusb'
+    [[ $quiet == true ]] || printf '%s\n' "$usb_bt" | sed 's/^/     /'
+  else
+    [[ $quiet == true ]] || printf '[INFO] no USB device description explicitly matched Bluetooth; internal controllers may still be present\n'
+  fi
+fi
+
 if [[ -S /run/dbus/system_bus_socket ]]; then
   ok 'system D-Bus socket exists at /run/dbus/system_bus_socket'
 else

@@ -6,6 +6,7 @@ services:
     environment:
       DBUS_SYSTEM_BUS_ADDRESS: unix:path=/run/dbus/system_bus_socket
     ports:
+      - "8080:8080/tcp"
       - "9105:9105/tcp"
       - "1161:1161/udp"
     volumes:

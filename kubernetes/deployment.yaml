@@ -29,6 +29,7 @@ spec:
               valueFrom:
                 secretKeyRef: {name: ble-sensors-mqtt-secrets, key: MQTT_USERNAME, optional: true}
           ports:
+            - {name: frontend, containerPort: 8080, protocol: TCP}
             - {name: prometheus, containerPort: 9105, protocol: TCP}
             - {name: snmp, containerPort: 1161, protocol: UDP}
           volumeMounts:

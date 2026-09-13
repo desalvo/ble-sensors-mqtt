@@ -11,5 +11,5 @@ RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=83" wheel \
  && chmod 0755 /app/docker/entrypoint.sh
 USER 10001:10001
 VOLUME ["/var/lib/ble-sensors-mqtt"]
-EXPOSE 9105/tcp 1161/udp
+EXPOSE 8080/tcp 9105/tcp 1161/udp
 ENTRYPOINT ["/app/docker/entrypoint.sh"]

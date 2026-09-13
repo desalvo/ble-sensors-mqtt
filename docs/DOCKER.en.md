@@ -150,3 +150,15 @@ After the normal Python/security/build jobs pass:
 - a pushed release tag `vX.Y.Z` publishes `desalvo/ble-sensors-mqtt:X.Y.Z`, after checking the tag version against `VERSION`.
 
 If `DOCKERHUB_PUSH_ENABLED` is absent or not `true`, the Docker publication job is skipped without affecting ordinary CI/release validation.
+
+## MQTT outage cache
+
+The container stores the SQLite MQTT spool in `/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3`, therefore the existing state volume also persists queued messages. Configure `MQTT_CACHE_ENABLED`, `MQTT_CACHE_PATH`, `MQTT_CACHE_MAX_SIZE`, and `REUSE_STALE_DATA` in `.env`.
+
+## Multiple Bluetooth controllers
+
+On a Linux Docker host with more than one BlueZ controller (for example internal Bluetooth plus a USB dongle), set `BLUETOOTH_ADAPTER=hci1` in `docker/.env`. The entrypoint forwards it as `--bluetooth-adapter hci1`. Leave it empty to use the BlueZ/Bleak default controller.
+
+## Authenticated frontend
+
+The image includes the optional web dependencies. Set `FRONTEND_ENABLED=true` to start the frontend, which listens on `FRONTEND_HOST`/`FRONTEND_PORT` (defaults `0.0.0.0:8080` in the container) and stores users, MFA, session state and browser runtime overrides under `/var/lib/ble-sensors-mqtt/frontend`. The Compose example publishes TCP/8080. For remote use, terminate TLS either with `FRONTEND_TLS_CERT`/`FRONTEND_TLS_KEY` mounted as secrets or at a reverse proxy. See `FRONTEND.en.md`.

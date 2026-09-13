@@ -10,3 +10,5 @@ recursive-include docker *
 recursive-include kubernetes *.yaml
 
 include docker/.env.example
+recursive-include src/ble_sensors_mqtt/web_templates *.html
+recursive-include src/ble_sensors_mqtt/web_static *.css *.png

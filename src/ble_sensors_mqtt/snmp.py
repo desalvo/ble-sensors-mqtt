@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from .binary import find_binary
 from .metrics import SensorStore, find_number, scalar_values
 from .version import __version__
 
@@ -151,6 +152,31 @@ def mib(store: SensorStore, base: tuple[int, ...]) -> dict[tuple[int, ...], byte
             (9, _octets(str(payload.get("manufacturer") or "Unknown"))),
             (10, _octets(str(payload.get("model") or "Unknown"))),
             (11, _octets(str(payload.get("protocol") or "Unknown"))),
+            (12, _integer(1 if payload.get("stale") else 0, 0x42)),
+            (
+                13,
+                _integer(1 if value else 0, 0x42)
+                if (value := find_binary(payload, "presence")) is not None
+                else None,
+            ),
+            (
+                14,
+                _integer(1 if value else 0, 0x42)
+                if (value := find_binary(payload, "motion")) is not None
+                else None,
+            ),
+            (
+                15,
+                _integer(1 if value else 0, 0x42)
+                if (value := find_binary(payload, "occupancy")) is not None
+                else None,
+            ),
+            (
+                16,
+                _integer(1 if value else 0, 0x42)
+                if (value := find_binary(payload, "moving")) is not None
+                else None,
+            ),
         )
         for column, encoded in values:
             if encoded is not None:
@@ -168,9 +194,16 @@ def mib(store: SensorStore, base: tuple[int, ...]) -> dict[tuple[int, ...], byte
             else:
                 value_type = "string"
                 rendered = str(value)
-            generic_values = (key, rendered, value_type, unit, str(index), str(value_index))
-            for column, field in enumerate(generic_values, 1):
-                result[base + (20, 1, column, index, value_index)] = _octets(field)
+            generic_values: tuple[bytes, ...] = (
+                _octets(key),
+                _octets(rendered),
+                _octets(value_type),
+                _octets(unit),
+                _integer(index),
+                _integer(value_index),
+            )
+            for column, encoded in enumerate(generic_values, 1):
+                result[base + (20, 1, column, index, value_index)] = encoded
     return result
 
 

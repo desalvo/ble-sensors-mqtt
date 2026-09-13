@@ -1,5 +1,7 @@
 # Installation and usage manual
 
+
+> Host support: Linux x86_64/arm64 on Debian/Ubuntu/Raspberry Pi OS and RHEL/Rocky/AlmaLinux/CentOS/Fedora, plus Windows 11+ and macOS Tahoe 26+. Internal and USB Bluetooth are supported through the host OS stack. See `HOSTS.en.md`.
 **English** · [Italiano](USAGE.it.md)
 
 ## 1. Purpose
@@ -112,33 +114,115 @@ dependency. Tuya devices running BTHome firmware may work locally.
 
 ## 7. Prometheus
 
+Enable the HTTP exporter with:
+
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --prometheus
 curl http://127.0.0.1:9105/metrics
 ```
 
-Each sensor series has address, name, manufacturer, model, and protocol labels. Dedicated
-metrics cover temperature, humidity, battery, and RSSI. Other numbers and booleans use
-`ble_sensors_sensor_value`; strings use `ble_sensors_sensor_info`.
+The default listener is `127.0.0.1:9105`. A non-loopback bind requires the explicit
+`--allow-external-prometheus` acknowledgement. The endpoint has no built-in authentication or
+TLS, so external access should be protected by firewall rules, a VPN, or an authenticated
+reverse proxy.
+
+### Exported Prometheus metrics
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `ble_sensors_up` | gauge | `address,name,manufacturer,model,protocol` | `1` for a fresh snapshot, `0` when the exported snapshot is reused/stale |
+| `ble_sensors_stale` | gauge | same sensor labels | `1` when the snapshot was reused from a previous cycle, otherwise `0` |
+| `ble_sensors_temperature_celsius` | gauge | same sensor labels | recursively discovered numeric `temperature` value, in degrees Celsius |
+| `ble_sensors_humidity_percent` | gauge | same sensor labels | recursively discovered numeric `humidity` value, in percent |
+| `ble_sensors_battery_percent` | gauge | same sensor labels | recursively discovered numeric `battery` or `battery_percent` value |
+| `ble_sensors_rssi_dbm` | gauge | same sensor labels | top-level Bluetooth RSSI in dBm, when available |
+| `ble_sensors_sensor_value` | gauge | sensor labels + `key,unit` | every numeric scalar; booleans are exported as `0`/`1` |
+| `ble_sensors_sensor_info` | gauge | sensor labels + `key,unit,value` | every non-null string scalar, represented by a constant sample value of `1` |
+| `ble_sensors_devices` | gauge | none | number of snapshots currently exported, including reused stale snapshots |
+| `ble_sensors_cycles_total` | counter | none | polling cycles attempted by the gateway |
+| `ble_sensors_cycles_failed_total` | counter | none | polling cycles marked as failed |
+
+The generic metrics are generated only from the normalized sensor `data` object. Nested dictionaries
+are flattened with dotted paths such as `air.co2`; list/tuple entries use numeric path components such
+as `channels.0`. The reserved `data.units` mapping is not exported as sensor data; when available, its
+leaf-name mapping supplies the `unit` label. At most 256 scalar values per sensor are exported. `null`
+values are omitted from Prometheus.
+
+Dedicated temperature/humidity/battery metrics and the generic metric can intentionally expose the same
+measurement. The dedicated names are convenient for stable dashboards, while the generic family preserves
+all plugin-provided scalar values. Because `ble_sensors_sensor_info` puts string values in labels, highly
+variable strings can increase Prometheus cardinality.
+
+Example:
+
+```text
+ble_sensors_up{address="AA:BB:CC:DD:EE:FF",name="Room",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE"} 1
+ble_sensors_temperature_celsius{address="AA:BB:CC:DD:EE:FF",name="Room",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE"} 21.5
+ble_sensors_sensor_value{address="AA:BB:CC:DD:EE:FF",name="Room",manufacturer="SwitchBot",model="Meter Plus",protocol="SwitchBot BLE",key="temperature",unit="°C"} 21.5
+```
+
+The same HTTP server also exposes `/healthz` and `/readyz`. `/healthz` reports process liveness;
+`/readyz` returns HTTP 503 until a polling cycle succeeds and again when the latest successful cycle
+becomes too old.
 
 ```bash
 --prometheus --prometheus-host 0.0.0.0 --prometheus-port 9200 --allow-external-prometheus
 ```
 
-The default is `127.0.0.1:9105`. `0.0.0.0` or `::` permits external access if the firewall
-allows it. The endpoint has no authentication or TLS; use a VPN, reverse proxy, or network ACL.
-
 ## 8. SNMP
+
+Enable the read-only SNMPv2c agent with a protected community file:
 
 ```bash
 .venv/bin/ble-sensors-mqtt --mqtt-host 192.0.2.10 --snmp \
   --snmp-community-file /etc/ble-sensors-mqtt/snmp-community
 ```
 
-The default is `127.0.0.1:1161`. Use `--snmp-host 0.0.0.0 --allow-external-snmp`/`::` and `--snmp-port` for external
-access. Table `.10` includes manufacturer, model, and protocol; `.20` exposes every scalar as
-key, value, type, and unit. SNMPv2c is not encrypted: restrict UDP access or use a VPN/SNMPv3
-proxy. The bundled MIB is `BLE-SENSORS-MQTT-MIB.txt`.
+The default listener is `127.0.0.1:1161/udp`. Non-loopback binding requires
+`--allow-external-snmp`. SNMPv2c does not encrypt the community or payload, so restrict UDP access or
+use a VPN/SNMPv3 proxy.
+
+With the default `--snmp-base-oid 1.3.6.1.4.1.32473.1.1`, the exported tree is:
+
+| OID suffix | MIB object | Type | Meaning |
+| --- | --- | --- | --- |
+| `.1.0` | `bleSensorsVersion` | DisplayString | application identification/version string |
+| `.2.0` | `bleSensorsDeviceCount` | Gauge32 | number of snapshots currently exported |
+| `.10.1.1.I` | `bleSensorsIndex` | Integer32 | transient device row index |
+| `.10.1.2.I` | `bleSensorsAddress` | DisplayString | normalized sensor identifier/address |
+| `.10.1.3.I` | `bleSensorsName` | DisplayString | effective sensor name/alias |
+| `.10.1.4.I` | `bleSensorsRssi` | Integer32 | RSSI in dBm, omitted when unavailable |
+| `.10.1.5.I` | `bleSensorsTemperatureMilliCelsius` | Integer32 | temperature multiplied by 1000 |
+| `.10.1.6.I` | `bleSensorsHumidityMilliPercent` | Gauge32 | relative humidity multiplied by 1000 |
+| `.10.1.7.I` | `bleSensorsBatteryPercent` | Gauge32 | battery percentage rounded to an integer |
+| `.10.1.8.I` | `bleSensorsObservedAt` | DisplayString | original observation timestamp |
+| `.10.1.9.I` | `bleSensorsManufacturer` | DisplayString | manufacturer, or `Unknown` |
+| `.10.1.10.I` | `bleSensorsModel` | DisplayString | model, or `Unknown` |
+| `.10.1.11.I` | `bleSensorsProtocol` | DisplayString | protocol, or `Unknown` |
+| `.10.1.12.I` | `bleSensorsStale` | Gauge32 | `1` for reused/stale data, otherwise `0` |
+| `.20.1.1.I.J` | `bleSensorsValueKey` | DisplayString | flattened scalar key/path |
+| `.20.1.2.I.J` | `bleSensorsValue` | DisplayString | scalar rendered as text |
+| `.20.1.3.I.J` | `bleSensorsValueType` | DisplayString | `null`, `boolean`, `number`, or `string` |
+| `.20.1.4.I.J` | `bleSensorsValueUnit` | DisplayString | unit from `data.units`, when available |
+| `.20.1.5.I.J` | `bleSensorsValueDeviceIndex` | Integer32 | device index `I` |
+| `.20.1.6.I.J` | `bleSensorsValueIndex` | Integer32 | scalar row index `J` |
+
+Rows in `.10` are ordered by the normalized sensor identifier, so index `I` is transient and may change
+when the exported device set changes. Optional common-measurement columns are absent when their values are
+not available. Table `.20` contains up to 256 scalar values from each sensor `data` object and uses the same
+flattening rules as Prometheus. SNMP textual fields are capped by the agent at 512 encoded bytes.
+
+The bundled textual MIB is `docs/BLE-SENSORS-MQTT-MIB.txt`. PEN `32473` is documentation-only. In
+production, use an assigned enterprise OID with `--snmp-base-oid`. Changing the base OID relocates the same
+suffix layout shown above; the bundled textual MIB itself still names the documented default root.
+
+Example walks:
+
+```bash
+snmpwalk -v2c -c RANDOM_COMMUNITY 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1
+snmpwalk -v2c -c RANDOM_COMMUNITY 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1.10
+snmpwalk -v2c -c RANDOM_COMMUNITY 127.0.0.1:1161 1.3.6.1.4.1.32473.1.1.20
+```
 
 ## 9. systemd
 
@@ -163,7 +247,11 @@ sudo scripts/install-systemd.sh --non-interactive \
   --home-assistant-discovery --prometheus
 ```
 
-The installer creates the service user, isolated venv, root-owned configuration and `/etc/ble-sensors-mqtt/service-args.json`; repeatable arguments and values containing spaces are preserved without shell parsing. In interactive mode, CLI values remain the defaults shown by the wizard and already supplied repeatable options are retained. Use `--non-interactive` to install only from CLI/default values. See `docs/SYSTEMD.en.md`.
+The installer creates the service user, isolated venv, root-owned configuration and `/etc/ble-sensors-mqtt/config.toml`; repeatable options are stored as TOML arrays and values containing spaces are preserved without shell parsing. In interactive mode, CLI values remain the defaults shown by the wizard and already supplied repeatable options are retained. Use `--non-interactive` to install only from CLI/default values. See `docs/SYSTEMD.en.md`.
+
+## Windows/macOS graphical installation and settings
+
+Tagged Windows releases include a standard graphical `-setup.exe` installer; tagged macOS releases include standard `.pkg` installers for Apple Silicon and Intel. Both install a graphical **ble-sensors-mqtt Settings** application. Windows uses a system Windows Service and `%ProgramData%\ble-sensors-mqtt\config.toml`; macOS uses a per-user launchd LaunchAgent and `~/Library/Application Support/ble-sensors-mqtt/config.toml`. The GUI can save configuration, start/stop/restart the service, test Bluetooth, and open the configuration folder. CLI arguments override TOML without rewriting it. See `docs/NATIVE-INSTALLERS.en.md` and `docs/CONFIGURATION.en.md`.
 
 ## 10. Docker and Kubernetes
 
@@ -240,3 +328,12 @@ scripts/release-check.sh
 The gate requires lint, tests/coverage, Bandit, dependency audit, EN/IT PDF generation, wheel and sdist build, `twine check`, CycloneDX SBOM generation, and release package verification. CI repeats runtime tests on Python 3.11, 3.12 and 3.13.
 
 For GitHub publication, push the source commit first and then push a matching `vX.Y.Z` tag. The tag workflow runs all gates, builds deterministic release assets, creates consolidated SHA-256 checksums, and publishes the GitHub Release automatically only after the test and build jobs succeed. The release job checks that the tag version matches `VERSION` and `pyproject.toml`.
+
+## Stale fallback and persistent MQTT cache
+
+Use `--reuse-stale-data` to preserve the last in-memory sensor snapshot when a cycle misses that sensor or produces no sensor data. Reused snapshots retain the original observation timestamp and set `stale: true`; fresh readings set `stale: false`. The MQTT SQLite spool is enabled by default, has a 1 GiB logical limit, continues collecting while the broker is offline, flushes FIFO after reconnection, and removes records only after MQTT acknowledgement. Configure it with `--mqtt-cache-path PATH`, `--mqtt-cache-max-size SIZE`, or `--no-mqtt-cache`.
+
+## Optional web frontend
+
+Enable the authenticated web console with `--frontend` after installing `.[web]` or `.[all]`. Default bind is `127.0.0.1:8080`; use `--allow-external-frontend` for a non-loopback address and protect remote access with HTTPS or a TLS reverse proxy. Initial credentials are `admin` / `password`, with mandatory password change at the first login. The console provides responsive desktop/mobile sensor status, admin/reader authorization, persistent runtime settings, local/LDAP/OIDC authentication, TOTP MFA for local/LDAP users, user administration and encrypted import/export of configuration plus available cache/state. Full details are in `docs/FRONTEND.en.md`.
+

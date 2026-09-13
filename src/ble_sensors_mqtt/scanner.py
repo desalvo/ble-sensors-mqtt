@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from typing import Any
 
 from .plugin_api import SensorPlugin, SensorReading
@@ -29,6 +30,7 @@ async def scan(
     duration: float,
     plugins: list[SensorPlugin],
     decode_timeout: float = 15.0,
+    adapter: str | None = None,
 ) -> list[SensorReading]:
     if not plugins:
         return []
@@ -40,7 +42,12 @@ async def scan(
     def detected(device: Any, advertisement: Any) -> None:
         advertisements[device.address.upper()] = (device, advertisement)
 
-    scanner = BleakScanner(detection_callback=detected)
+    scanner_kwargs: dict[str, Any] = {}
+    if adapter:
+        if not sys.platform.startswith("linux"):
+            raise ValueError("--bluetooth-adapter is currently supported only on Linux/BlueZ")
+        scanner_kwargs["bluez"] = {"adapter": adapter}
+    scanner = BleakScanner(detection_callback=detected, **scanner_kwargs)
     await scanner.start()
     try:
         await asyncio.sleep(duration)

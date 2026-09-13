@@ -7,35 +7,43 @@ IMPORTS
         FROM SNMPv2-TC;
 
 bleSensorsMqtt MODULE-IDENTITY
-    LAST-UPDATED "202609110000Z"
+    LAST-UPDATED "202609130000Z"
     ORGANIZATION "ble-sensors-mqtt"
     CONTACT-INFO "Alessandro De Salvo <braket71@gmail.com>"
     DESCRIPTION
-        "Read-only metrics exported by ble-sensors-mqtt. All plugin-provided
-         scalar values are exposed. Enterprise number 32473 is reserved
-         for documentation. Configure an assigned PEN
-         before production use."
+        "Read-only values exported by ble-sensors-mqtt. The common device
+         table exposes normalized identity and common measurements; the
+         generic value table exposes up to 256 scalar values from each
+         normalized sensor data object. Enterprise number 32473 is used
+         for documentation only. Configure an assigned enterprise OID
+         before production use. If --snmp-base-oid is changed, the agent
+         keeps the same suffix layout but this textual MIB continues to
+         name the documented default root."
     ::= { enterprises 32473 1 1 }
 
 bleSensorsVersion OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
-    DESCRIPTION "Application version."
+    DESCRIPTION "Application identification and version string."
     ::= { bleSensorsMqtt 1 0 }
 
 bleSensorsDeviceCount OBJECT-TYPE
     SYNTAX Gauge32
     MAX-ACCESS read-only
     STATUS current
-    DESCRIPTION "Devices observed in the latest BLE scan."
+    DESCRIPTION
+        "Number of sensor snapshots currently exported. When stale reuse is
+         enabled this count includes reused stale snapshots."
     ::= { bleSensorsMqtt 2 0 }
 
 bleSensorsDeviceTable OBJECT-TYPE
     SYNTAX SEQUENCE OF BleSensorsDeviceEntry
     MAX-ACCESS not-accessible
     STATUS current
-    DESCRIPTION "Latest values, indexed by sorted BLE address."
+    DESCRIPTION
+        "Current normalized sensor snapshots. Rows are ordered by normalized
+         sensor identifier/address; the numeric row index is transient."
     ::= { bleSensorsMqtt 10 }
 
 bleSensorsDeviceEntry OBJECT-TYPE
@@ -56,71 +64,115 @@ BleSensorsDeviceEntry ::= SEQUENCE {
     bleSensorsObservedAt DisplayString,
     bleSensorsManufacturer DisplayString,
     bleSensorsModel DisplayString,
-    bleSensorsProtocol DisplayString
+    bleSensorsProtocol DisplayString,
+    bleSensorsStale Gauge32
 }
 
 bleSensorsIndex OBJECT-TYPE
     SYNTAX Integer32 (1..2147483647)
     MAX-ACCESS read-only
     STATUS current
-    DESCRIPTION "Transient row index assigned by sorted BLE address."
+    DESCRIPTION
+        "Transient row index assigned by lexicographically sorting the
+         normalized sensor identifier/address."
     ::= { bleSensorsDeviceEntry 1 }
+
 bleSensorsAddress OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Normalized BLE MAC address or cloud/plugin sensor identifier."
     ::= { bleSensorsDeviceEntry 2 }
+
 bleSensorsName OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Effective sensor name after configured aliases are applied."
     ::= { bleSensorsDeviceEntry 3 }
+
 bleSensorsRssi OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Bluetooth RSSI in dBm. The instance is absent when RSSI is unavailable."
     ::= { bleSensorsDeviceEntry 4 }
+
 bleSensorsTemperatureMilliCelsius OBJECT-TYPE
     SYNTAX Integer32
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Temperature in thousandths of a degree Celsius, derived from the
+         first recursively discovered numeric data field named temperature.
+         The instance is absent when unavailable."
     ::= { bleSensorsDeviceEntry 5 }
+
 bleSensorsHumidityMilliPercent OBJECT-TYPE
     SYNTAX Gauge32
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Relative humidity in thousandths of one percent, derived from the
+         first recursively discovered numeric data field named humidity.
+         The instance is absent when unavailable."
     ::= { bleSensorsDeviceEntry 6 }
+
 bleSensorsBatteryPercent OBJECT-TYPE
     SYNTAX Gauge32
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Battery percentage rounded to the nearest integer, derived from
+         battery or battery_percent. The instance is absent when unavailable."
     ::= { bleSensorsDeviceEntry 7 }
+
 bleSensorsObservedAt OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Original observation timestamp as exported by the normalized
+         snapshot. Reused stale snapshots preserve the original timestamp."
     ::= { bleSensorsDeviceEntry 8 }
+
 bleSensorsManufacturer OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Sensor manufacturer, or Unknown when not identified."
     ::= { bleSensorsDeviceEntry 9 }
+
 bleSensorsModel OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Sensor model, or Unknown when not identified."
     ::= { bleSensorsDeviceEntry 10 }
+
 bleSensorsProtocol OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Sensor protocol, or Unknown when not identified."
     ::= { bleSensorsDeviceEntry 11 }
+
+bleSensorsStale OBJECT-TYPE
+    SYNTAX Gauge32 (0..1)
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "1 when the row reuses a previous sensor reading; 0 when fresh."
+    ::= { bleSensorsDeviceEntry 12 }
 
 bleSensorsValueTable OBJECT-TYPE
     SYNTAX SEQUENCE OF BleSensorsValueEntry
     MAX-ACCESS not-accessible
     STATUS current
-    DESCRIPTION "Every scalar value supplied by a sensor plugin."
+    DESCRIPTION
+        "Generic scalar values from the normalized sensor data object. Nested
+         dictionaries use dotted key paths and list/tuple entries use numeric
+         path components. The reserved data.units mapping is not itself a
+         value row. At most 256 scalar rows are exported per sensor."
     ::= { bleSensorsMqtt 20 }
 
 bleSensorsValueEntry OBJECT-TYPE
@@ -143,31 +195,46 @@ bleSensorsValueKey OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Flattened scalar key/path, for example temperature or air.co2."
     ::= { bleSensorsValueEntry 1 }
+
 bleSensorsValue OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Scalar value rendered as text. Null is rendered as an empty string;
+         booleans as true/false; numbers and strings use their text form."
     ::= { bleSensorsValueEntry 2 }
+
 bleSensorsValueType OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "One of null, boolean, number, or string."
     ::= { bleSensorsValueEntry 3 }
+
 bleSensorsValueUnit OBJECT-TYPE
     SYNTAX DisplayString
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION
+        "Unit associated with the scalar leaf name by the optional data.units
+         mapping, or an empty string when no unit is known."
     ::= { bleSensorsValueEntry 4 }
+
 bleSensorsValueDeviceIndex OBJECT-TYPE
     SYNTAX Integer32 (1..2147483647)
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Device row index matching bleSensorsIndex."
     ::= { bleSensorsValueEntry 5 }
+
 bleSensorsValueIndex OBJECT-TYPE
     SYNTAX Integer32 (1..2147483647)
     MAX-ACCESS read-only
     STATUS current
+    DESCRIPTION "Transient scalar row index within one device."
     ::= { bleSensorsValueEntry 6 }
 
 END

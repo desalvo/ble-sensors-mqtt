@@ -1,9 +1,19 @@
 # Changelog
+- Aggiunto frontend web responsive autenticato opzionale con dashboard sensori, RBAC admin/reader, autenticazione locale/LDAP/OIDC, MFA TOTP portabile, configurazione runtime persistente e backup/restore completo cifrato.
+- Aggiunti configurazione unificata `config.toml` (CLI > file > default), applicazioni grafiche Settings per Windows/macOS, servizio Windows e gestione LaunchAgent launchd su macOS. La CI sui tag costruisce ora installer standard Windows `.exe` e macOS `.pkg` oltre ai bundle portabili.
 - Aggiunti preflight Bluetooth host, mount `/run/dbus` esplicito per Docker/Kubernetes, pod Kubernetes di test BLE e installer bootstrap da clone GitHub con prerequisiti, venv e systemd.
 
 [English](CHANGELOG.en.md) · **Italiano**
 
+- Aggiunto supporto di prima classe per presenza/motion/occupancy/moving: alias vendor comuni, binary sensor Home Assistant, gauge Prometheus dedicate e colonne nella tabella SNMP comune.
+
 ## 1.0.0 - 2026-09-12
+
+- Esteso il supporto host a Linux x86_64/arm64 sulle famiglie Debian e Red Hat, Bluetooth interno/USB con selezione adattatore Linux, Windows 11+, macOS Tahoe 26+ e bundle nativi generati dalla CI ad ogni tag.
+
+- Estesa la documentazione Prometheus/SNMP con i contratti completi metriche/OID e corretti gli indici della tabella SNMP generica per rispettare i tipi Integer32 della MIB inclusa.
+
+- Aggiunti riuso opzionale delle letture stale e cache MQTT SQLite persistente e limitata con replay FIFO automatico alla riconnessione.
 
 - Aggiunti installer systemd interattivo/non-interattivo, Docker/Compose multiarch, manifest Kubernetes e pubblicazione Docker Hub in CI.
 

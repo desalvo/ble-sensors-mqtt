@@ -17,3 +17,5 @@ docker/.env
 docker/secrets
 .env
 secrets
+
+native-dist/

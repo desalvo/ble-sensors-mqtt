@@ -12,6 +12,9 @@ more values. Use --non-interactive to install exactly from CLI/default values.
 
 Usage: sudo scripts/install-systemd.sh [options]
   --non-interactive
+  --with-sensors | --without-sensors   install optional BLE decoder packages; default with
+  --with-cloud | --without-cloud       install cloud provider packages; default with
+  --with-web | --without-web           install authenticated frontend dependencies; default with
   --mqtt-host HOST                 required
   --mqtt-port PORT                 default 8883
   --mqtt-topic-prefix PREFIX       default ble-sensors
@@ -20,8 +23,13 @@ Usage: sudo scripts/install-systemd.sh [options]
   --mqtt-tls | --no-mqtt-tls       default TLS enabled
   --mqtt-ca-file FILE              default system CA bundle
   --allow-insecure-mqtt
+  --mqtt-cache | --no-mqtt-cache   default enabled
+  --mqtt-cache-path FILE           default /var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3
+  --mqtt-cache-max-size SIZE       default 1GiB
+  --reuse-stale-data               reuse previous readings when a sensor is missing
   --poll-interval SEC              default 30
   --scan-duration SEC              default 8
+  --bluetooth-adapter ADAPTER      Linux BlueZ adapter, e.g. hci1
   --device ID                      repeatable
   --device-name MAC=NAME           repeatable
   --sensor-name ID=NAME            repeatable
@@ -36,6 +44,13 @@ Usage: sudo scripts/install-systemd.sh [options]
   --snmp-port PORT                 default 1161
   --snmp-community-file FILE
   --allow-external-snmp
+  --frontend
+  --frontend-host IP               default 127.0.0.1
+  --frontend-port PORT             default 8080
+  --frontend-data-dir DIR          default /var/lib/ble-sensors-mqtt/frontend
+  --allow-external-frontend
+  --frontend-tls-cert FILE
+  --frontend-tls-key FILE
   --cloud-config FILE
   --extra-arg ARG                  repeatable raw application argument
   --enable | --no-enable           default enable
@@ -81,6 +96,9 @@ append_prompt() {
 }
 
 interactive=true
+install_sensors=true
+install_cloud=true
+install_web=true
 mqtt_host=''
 mqtt_port=8883
 mqtt_topic_prefix='ble-sensors'
@@ -89,8 +107,13 @@ mqtt_password_source=''
 mqtt_tls=true
 mqtt_ca_file='/etc/ssl/certs/ca-certificates.crt'
 allow_insecure_mqtt=false
+mqtt_cache=true
+mqtt_cache_path='/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3'
+mqtt_cache_max_size='1GiB'
+reuse_stale_data=false
 poll_interval=30
 scan_duration=8
+bluetooth_adapter=''
 home_assistant_discovery=false
 home_assistant_discovery_prefix='homeassistant'
 prometheus=false
@@ -102,6 +125,13 @@ snmp_host='127.0.0.1'
 snmp_port=1161
 snmp_community_source=''
 allow_external_snmp=false
+frontend=false
+frontend_host='127.0.0.1'
+frontend_port=8080
+frontend_data_dir='/var/lib/ble-sensors-mqtt/frontend'
+allow_external_frontend=false
+frontend_tls_cert=''
+frontend_tls_key=''
 cloud_config_source=''
 enable_service=true
 start_service=true
@@ -115,6 +145,12 @@ extra_args=()
 while (($#)); do
   case "$1" in
     --non-interactive) interactive=false; shift ;;
+    --with-sensors) install_sensors=true; shift ;;
+    --without-sensors) install_sensors=false; shift ;;
+    --with-cloud) install_cloud=true; shift ;;
+    --without-cloud) install_cloud=false; shift ;;
+    --with-web) install_web=true; shift ;;
+    --without-web) install_web=false; shift ;;
     --mqtt-host) mqtt_host=${2:?}; shift 2 ;;
     --mqtt-port) mqtt_port=${2:?}; shift 2 ;;
     --mqtt-topic-prefix) mqtt_topic_prefix=${2:?}; shift 2 ;;
@@ -124,8 +160,14 @@ while (($#)); do
     --no-mqtt-tls) mqtt_tls=false; shift ;;
     --mqtt-ca-file) mqtt_ca_file=${2:?}; shift 2 ;;
     --allow-insecure-mqtt) allow_insecure_mqtt=true; shift ;;
+    --mqtt-cache) mqtt_cache=true; shift ;;
+    --no-mqtt-cache) mqtt_cache=false; shift ;;
+    --mqtt-cache-path) mqtt_cache_path=${2:?}; shift 2 ;;
+    --mqtt-cache-max-size) mqtt_cache_max_size=${2:?}; shift 2 ;;
+    --reuse-stale-data) reuse_stale_data=true; shift ;;
     --poll-interval) poll_interval=${2:?}; shift 2 ;;
     --scan-duration) scan_duration=${2:?}; shift 2 ;;
+    --bluetooth-adapter) bluetooth_adapter=${2:?}; shift 2 ;;
     --device) device_args+=("${2:?}"); shift 2 ;;
     --device-name) device_name_args+=("${2:?}"); shift 2 ;;
     --sensor-name) sensor_name_args+=("${2:?}"); shift 2 ;;
@@ -140,6 +182,13 @@ while (($#)); do
     --snmp-port) snmp_port=${2:?}; shift 2 ;;
     --snmp-community-file) snmp_community_source=${2:?}; shift 2 ;;
     --allow-external-snmp) allow_external_snmp=true; shift ;;
+    --frontend) frontend=true; shift ;;
+    --frontend-host) frontend_host=${2:?}; shift 2 ;;
+    --frontend-port) frontend_port=${2:?}; shift 2 ;;
+    --frontend-data-dir) frontend_data_dir=${2:?}; shift 2 ;;
+    --allow-external-frontend) allow_external_frontend=true; shift ;;
+    --frontend-tls-cert) frontend_tls_cert=${2:?}; shift 2 ;;
+    --frontend-tls-key) frontend_tls_key=${2:?}; shift 2 ;;
     --cloud-config) cloud_config_source=${2:?}; shift 2 ;;
     --extra-arg) extra_args+=("${2:?}"); shift 2 ;;
     --enable) enable_service=true; shift ;;
@@ -160,6 +209,10 @@ fi
 
 if [[ $interactive == true ]]; then
   echo 'ble-sensors-mqtt systemd configuration; Enter keeps the shown default.'
+  echo 'Select optional software components to install:'
+  install_sensors=$(bool_prompt 'Install optional BLE sensor decoder packages?' "$install_sensors")
+  install_cloud=$(bool_prompt 'Install cloud provider packages (for example Tuya)?' "$install_cloud")
+  install_web=$(bool_prompt 'Install authenticated web frontend dependencies?' "$install_web")
   mqtt_host=$(value_prompt 'MQTT host' "$mqtt_host")
   mqtt_tls=$(bool_prompt 'Use verified MQTT TLS?' "$mqtt_tls")
   if [[ $mqtt_tls == true && $mqtt_port == 1883 ]]; then
@@ -176,15 +229,26 @@ if [[ $interactive == true ]]; then
   mqtt_username=$(value_prompt 'MQTT username (blank for none)' "$mqtt_username")
   mqtt_password_source=$(value_prompt \
     'MQTT password file to copy (blank for none)' "$mqtt_password_source")
+  mqtt_cache=$(bool_prompt 'Enable persistent MQTT disk cache?' "$mqtt_cache")
+  if [[ $mqtt_cache == true ]]; then
+    mqtt_cache_path=$(value_prompt 'MQTT cache path' "$mqtt_cache_path")
+    mqtt_cache_max_size=$(value_prompt 'MQTT cache maximum size' "$mqtt_cache_max_size")
+  fi
+  reuse_stale_data=$(bool_prompt 'Reuse previous sensor data when missing?' "$reuse_stale_data")
   poll_interval=$(value_prompt 'Polling interval seconds' "$poll_interval")
   scan_duration=$(value_prompt 'BLE scan duration seconds' "$scan_duration")
+  bluetooth_adapter=$(value_prompt 'Linux Bluetooth adapter (blank = OS default)' "$bluetooth_adapter")
 
   append_prompt 'Allowed sensor ID' device_args
   append_prompt 'BLE alias MAC=NAME' device_name_args
   append_prompt 'Generic/cloud alias ID=NAME' sensor_name_args
 
-  cloud_config_source=$(value_prompt \
-    'Cloud provider TOML file to copy (blank for none)' "$cloud_config_source")
+  if [[ $install_cloud == true ]]; then
+    cloud_config_source=$(value_prompt \
+      'Cloud provider TOML file to copy (blank for none)' "$cloud_config_source")
+  else
+    cloud_config_source=''
+  fi
   home_assistant_discovery=$(bool_prompt \
     'Enable Home Assistant MQTT Discovery?' "$home_assistant_discovery")
   if [[ $home_assistant_discovery == true ]]; then
@@ -214,6 +278,24 @@ if [[ $interactive == true ]]; then
     fi
   fi
 
+  if [[ $install_web == true ]]; then
+    frontend=$(bool_prompt 'Enable authenticated web frontend?' "$frontend")
+  else
+    frontend=false
+  fi
+  if [[ $frontend == true ]]; then
+    frontend_host=$(value_prompt 'Frontend bind IP' "$frontend_host")
+    frontend_port=$(value_prompt 'Frontend TCP port' "$frontend_port")
+    frontend_data_dir=$(value_prompt 'Frontend persistent data directory' "$frontend_data_dir")
+    if [[ $frontend_host != 127.0.0.1 && $frontend_host != ::1 ]]; then
+      allow_external_frontend=$(bool_prompt 'Allow external authenticated frontend?' "$allow_external_frontend")
+    fi
+    frontend_tls_cert=$(value_prompt 'Frontend TLS certificate PEM (blank for reverse proxy/plain HTTP)' "$frontend_tls_cert")
+    if [[ -n $frontend_tls_cert ]]; then
+      frontend_tls_key=$(value_prompt 'Frontend TLS private key PEM' "$frontend_tls_key")
+    fi
+  fi
+
   append_prompt 'Additional raw ble-sensors-mqtt argument' extra_args
   enable_service=$(bool_prompt 'Enable service at boot?' "$enable_service")
   start_service=$(bool_prompt 'Start/restart service now?' "$start_service")
@@ -224,6 +306,8 @@ fi
   echo '--mqtt-password-file requires --mqtt-username' >&2
   exit 2
 }
+[[ $frontend != true || $install_web == true ]] || { echo 'frontend enabled but web component is not installed' >&2; exit 2; }
+[[ -z $cloud_config_source || $install_cloud == true ]] || { echo 'cloud config supplied but cloud component is not installed' >&2; exit 2; }
 [[ $snmp != true || -n $snmp_community_source ]] || {
   echo 'SNMP requires --snmp-community-file' >&2
   exit 2
@@ -265,7 +349,16 @@ if [[ ! -x $install_root/.venv/bin/python ]]; then
   python3 -m venv "$install_root/.venv"
 fi
 "$install_root/.venv/bin/python" -m pip install --upgrade pip 'setuptools>=83' wheel
-"$install_root/.venv/bin/pip" install --upgrade "$install_root[all]"
+extras=()
+[[ $install_sensors == false ]] || extras+=(sensors)
+[[ $install_cloud == false ]] || extras+=(cloud)
+[[ $install_web == false ]] || extras+=(web)
+if ((${#extras[@]})); then
+  extras_csv=$(IFS=,; echo "${extras[*]}")
+  "$install_root/.venv/bin/pip" install --upgrade "$install_root[$extras_csv]"
+else
+  "$install_root/.venv/bin/pip" install --upgrade "$install_root"
+fi
 chown -R root:root "$install_root/.venv"
 
 copy_secret() {
@@ -298,6 +391,12 @@ args=(
   --scan-duration "$scan_duration"
   --state-file /var/lib/ble-sensors-mqtt/state.json
 )
+if [[ $mqtt_cache == true ]]; then
+  args+=(--mqtt-cache --mqtt-cache-path "$mqtt_cache_path" --mqtt-cache-max-size "$mqtt_cache_max_size")
+else
+  args+=(--no-mqtt-cache)
+fi
+[[ $reuse_stale_data == false ]] || args+=(--reuse-stale-data)
 [[ -z $mqtt_username ]] || args+=(--mqtt-username "$mqtt_username")
 [[ -z $mqtt_password_dest ]] || args+=(--mqtt-password-file "$mqtt_password_dest")
 if [[ $mqtt_tls == true ]]; then
@@ -318,42 +417,36 @@ if [[ $snmp == true ]]; then
     --snmp-community-file "$snmp_community_dest")
   [[ $allow_external_snmp == false ]] || args+=(--allow-external-snmp)
 fi
+if [[ $frontend == true ]]; then
+  args+=(--frontend --frontend-host "$frontend_host" --frontend-port "$frontend_port" --frontend-data-dir "$frontend_data_dir")
+  [[ $allow_external_frontend == false ]] || args+=(--allow-external-frontend)
+  if [[ -n $frontend_tls_cert ]]; then
+    args+=(--frontend-tls-cert "$frontend_tls_cert" --frontend-tls-key "$frontend_tls_key")
+  fi
+fi
 [[ -z $cloud_config_dest ]] || args+=(--cloud-config "$cloud_config_dest")
+[[ -z $bluetooth_adapter ]] || args+=(--bluetooth-adapter "$bluetooth_adapter")
 for value in "${device_args[@]}"; do args+=(--device "$value"); done
 for value in "${device_name_args[@]}"; do args+=(--device-name "$value"); done
 for value in "${sensor_name_args[@]}"; do args+=(--sensor-name "$value"); done
 args+=("${extra_args[@]}")
 
-python3 - "$config_root/service-args.json" "${args[@]}" <<'PY'
-from __future__ import annotations
-
-import json
-import os
-import sys
-import tempfile
-from pathlib import Path
-
-path = Path(sys.argv[1])
-fd, temporary = tempfile.mkstemp(prefix=".service-args.", dir=path.parent)
-with os.fdopen(fd, "w", encoding="utf-8") as handle:
-    json.dump(sys.argv[2:], handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-os.chmod(temporary, 0o640)
-os.replace(temporary, path)
-PY
-chown root:ble-sensors-mqtt "$config_root/service-args.json"
-
-# Parse the final vector with the installed application before touching systemd.
-"$install_root/.venv/bin/python" - "$config_root/service-args.json" <<'PY'
-import json
+# Validate the final CLI vector and persist it in the shared config.toml schema.
+"$install_root/.venv/bin/python" - "$config_root/config.toml" "${args[@]}" <<'PY'
 import sys
 from pathlib import Path
 
 from ble_sensors_mqtt.cli import parser
+from ble_sensors_mqtt.config import atomic_write_config, config_from_namespace
 
-args = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-parser().parse_args(args)
+path = Path(sys.argv[1])
+parsed = parser().parse_args(sys.argv[2:])
+if parsed.once or parsed.scan or parsed.list_plugins or parsed.cloud_help:
+    raise SystemExit("one-shot CLI modes are not valid in the persistent systemd service")
+atomic_write_config(path, config_from_namespace(parsed))
 PY
+chown root:ble-sensors-mqtt "$config_root/config.toml"
+chmod 0640 "$config_root/config.toml"
 
 python3 - \
   "$src_dir/systemd/ble-sensors-mqtt.service" \
@@ -380,5 +473,5 @@ if [[ $start_service == true ]]; then
   systemctl restart ble-sensors-mqtt
 fi
 
-echo "Installed. Arguments: $config_root/service-args.json"
+echo "Installed. Configuration: $config_root/config.toml"
 echo 'Logs: journalctl -u ble-sensors-mqtt -f'

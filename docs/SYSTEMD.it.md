@@ -1,6 +1,10 @@
 # Deployment systemd
 
-`ble-sensors-mqtt` è pensato per funzionare in continua come demone Linux non privilegiato. L'installer fornito crea un account dedicato, una virtualenv Python isolata, configurazione root-owned, stato runtime persistente e una unità systemd irrobustita.
+`ble-sensors-mqtt` è pensato per funzionare in continua come demone Linux non privilegiato su x86_64 o arm64. L'installer fornito crea un account dedicato, una virtualenv Python isolata, configurazione root-owned, stato runtime persistente e una unità systemd irrobustita.
+
+### Bluetooth interno e USB
+
+BlueZ può esporre un controller interno, un dongle USB oppure entrambi. `bluetoothctl list` mostra i controller disponibili. Se ce n'è più di uno, passare `--bluetooth-adapter hciN` tra gli argomenti dell'applicazione/installer systemd per scegliere l'adattatore BlueZ desiderato. Il bootstrap installa `usbutils` dove disponibile per facilitare la diagnosi con `lsusb`.
 
 ## Prerequisiti
 
@@ -29,7 +33,7 @@ sudo scripts/install-from-github.sh --ref main --non-interactive \
 
 Per installare una release precisa usare, per esempio, `--ref v1.0.0`. Se eseguito dentro un clone Git, lo script usa direttamente quel checkout. Fuori da un clone usa `/usr/local/src/ble-sensors-mqtt` come checkout gestito; l'installazione runtime resta in `/opt/ble-sensors-mqtt`. Usare `--skip-system-deps` se i pacchetti host sono già gestiti esternamente e `--skip-bluetooth-check` solo per deployment esclusivamente cloud o quando il controllo viene eseguito separatamente.
 
-Lo script riconosce `apt`, `dnf` e `yum`; in caso di package manager differente richiede di installare manualmente Git, Python >=3.11 con supporto venv, BlueZ, D-Bus e `rfkill`.
+Lo script riconosce `apt`, `dnf` e `yum`, coprendo Debian/Ubuntu/Raspberry Pi OS e RHEL/Rocky/AlmaLinux/CentOS/Fedora; in caso di package manager differente richiede di installare manualmente Git, Python >=3.11 con supporto venv, BlueZ, D-Bus e `rfkill`.
 
 ## Verifica Bluetooth host
 
@@ -97,12 +101,12 @@ Layout predefinito:
 
 - applicazione e virtualenv: `/opt/ble-sensors-mqtt`;
 - configurazione protetta: `/etc/ble-sensors-mqtt`;
-- vettore argomenti del servizio: `/etc/ble-sensors-mqtt/service-args.json`;
+- configurazione unificata: `/etc/ble-sensors-mqtt/config.toml`;
 - stato persistente: `/var/lib/ble-sensors-mqtt/state.json`;
 - unità: `/etc/systemd/system/ble-sensors-mqtt.service`;
 - utente/gruppo di servizio: `ble-sensors-mqtt`.
 
-Il file degli argomenti è un array JSON e non testo shell. In questo modo opzioni ripetute e valori con spazi sono preservati senza `eval`, espansione shell o ambiguità di quoting. I secret passati all'installer vengono copiati root-owned e leggibili solo dal gruppo del servizio. Prima di modificare systemd il vettore finale viene validato dal parser dell'applicazione installata.
+Il servizio usa lo stesso schema TOML di Windows e macOS. Le opzioni ripetibili sono array TOML, i secret restano in file protetti separati e la configurazione generata viene validata dall'applicazione installata prima di modificare systemd. Gli argomenti CLI continuano ad avere precedenza sul TOML per esecuzioni manuali.
 
 ## Installazione manuale
 
@@ -119,17 +123,22 @@ sudo /opt/ble-sensors-mqtt/.venv/bin/pip install --upgrade \
   pip 'setuptools>=83' wheel '/opt/ble-sensors-mqtt[all]'
 ```
 
-Creare `/etc/ble-sensors-mqtt/service-args.json`, per esempio:
+Creare `/etc/ble-sensors-mqtt/config.toml`, per esempio:
 
-```json
-[
-  "--mqtt-host", "mqtt.example.net",
-  "--mqtt-port", "8883",
-  "--mqtt-tls",
-  "--prometheus",
-  "--state-file", "/var/lib/ble-sensors-mqtt/state.json"
-]
+```toml
+[mqtt]
+host = "mqtt.example.it"
+port = 8883
+tls = true
+
+[runtime]
+state_file = "/var/lib/ble-sensors-mqtt/state.json"
+
+[prometheus]
+enabled = true
 ```
+
+Proteggerlo con ownership `root:ble-sensors-mqtt` e mode `0640`. Vedere `CONFIGURATION.it.md` per lo schema completo.
 
 Installare quindi l'unità fornita:
 
@@ -150,3 +159,7 @@ journalctl -u ble-sensors-mqtt -f
 ```
 
 Per cambiare configurazione modificare l'array JSON oppure rieseguire l'installer con le opzioni desiderate e poi riavviare il servizio. Mantenere l'account non privilegiato e gli alberi applicazione/configurazione non scrivibili dal demone.
+
+## Fallback stale e cache MQTT
+
+L’installer chiede se abilitare il riuso stale e come configurare la cache MQTT persistente. I default sono cache attiva, `/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3`, 1 GiB e riuso stale disattivato. Gli stessi valori possono essere passati senza interazione con `--reuse-stale-data`, `--mqtt-cache-path`, `--mqtt-cache-max-size` o `--no-mqtt-cache`.

@@ -21,3 +21,5 @@ docker/secrets/
 # Local Kubernetes runtime overrides / secrets
 kubernetes/secret.yaml
 kubernetes/arguments-configmap.yaml
+
+native-dist/

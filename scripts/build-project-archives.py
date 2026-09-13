@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-EXCLUDED_PARTS = {".git", ".venv", "dist", "build", "release", "__pycache__", ".pytest_cache", ".ruff_cache"}
+EXCLUDED_PARTS = {".git", ".venv", "dist", "build", "release", "native-dist", "__pycache__", ".pytest_cache", ".ruff_cache"}
 
 
 def epoch() -> int:

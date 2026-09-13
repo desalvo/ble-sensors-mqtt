@@ -2,7 +2,7 @@
 
 **English** · [Italiano](PRODUCTION.it.md)
 
-Release 1.0.0 is intended for unattended Linux operation. Production-grade here means the application fails closed for unsafe network exposure, isolates plugin failures, bounds untrusted plugin data, exposes liveness/readiness, runs under a sandboxed unprivileged systemd account, and has mandatory automated release gates. It does not make SNMPv2c encrypted or add authentication to the Prometheus endpoint; those services remain loopback by default and require explicit opt-in for external binding.
+Release 1.0.0 primarily targets unattended Linux operation on x86_64/arm64, while tagged releases also produce native Windows 11+ and macOS Tahoe 26+ command-line bundles. Production-grade here means the application fails closed for unsafe network exposure, isolates plugin failures, bounds untrusted plugin data, exposes liveness/readiness, runs under a sandboxed unprivileged systemd account, and has mandatory automated release gates. It does not make SNMPv2c encrypted or add authentication to the Prometheus endpoint; those services remain loopback by default and require explicit opt-in for external binding.
 
 ## Required deployment controls
 
@@ -34,3 +34,15 @@ Do not build release files locally and upload them in place of failed CI artifac
 ## Docker Hub CI
 
 Set repository variable `DOCKERHUB_PUSH_ENABLED=true`, variable `DOCKERHUB_USERNAME=desalvo`, and secret `DOCKERHUB_TOKEN`. After test/build succeed, pushes to `main` publish `desalvo/ble-sensors-mqtt:latest`; release tags `vX.Y.Z` publish `desalvo/ble-sensors-mqtt:X.Y.Z` for amd64 and arm64.
+
+## MQTT outage durability
+
+The default SQLite MQTT spool provides bounded at-least-once delivery across broker outages and process restarts. Default logical capacity is 1 GiB. Operators should place the cache on persistent storage and monitor free disk space; when the configured logical limit is reached the oldest queued records are dropped first.
+
+## Native Windows/macOS release artifacts
+
+On every `vX.Y.Z` tag, CI builds platform-native PyInstaller bundles on `windows-2025`, `macos-26` (Apple Silicon) and `macos-26-intel`. Each bundle is smoke-tested with `--version` and `--list-plugins` before upload. Optional sensor/cloud dependencies are installed best-effort per platform; unsupported optional libraries are omitted and visible through `--list-plugins`. CI does not provide physical Bluetooth hardware, so BLE radio validation remains a deployment acceptance test.
+
+## Frontend production controls
+
+The optional frontend is authenticated but must still be treated as an administrative surface. Keep it loopback/internal by default, use HTTPS for remote access, change the bootstrap `admin/password` credential immediately, prefer reader roles, enable TOTP for local/LDAP administrators, protect the frontend state directory, and retain encrypted `.bsmqbackup` files as secrets. LDAP should use LDAPS/StartTLS and OIDC client/LDAP bind secrets must stay in protected files.

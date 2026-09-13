@@ -8,6 +8,7 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .binary import find_binary
 from .metrics import SensorStore, find_number, scalar_values
 
 LOG = logging.getLogger("ble_sensors_mqtt.prometheus")
@@ -21,8 +22,10 @@ def render(store: SensorStore) -> bytes:
     devices = store.snapshot()
     health = store.health()
     lines = [
-        "# HELP ble_sensors_up Whether a sensor was observed in the latest successful scan.",
+        "# HELP ble_sensors_up Whether a sensor was observed with fresh data in the latest successful scan.",
         "# TYPE ble_sensors_up gauge",
+        "# HELP ble_sensors_stale Whether the exported sensor snapshot is reused from a previous cycle.",
+        "# TYPE ble_sensors_stale gauge",
         "# HELP ble_sensors_sensor_value Numeric or boolean value exposed by a sensor plugin.",
         "# TYPE ble_sensors_sensor_value gauge",
         "# HELP ble_sensors_sensor_info Non-numeric value exposed by a sensor plugin.",
@@ -40,7 +43,15 @@ def render(store: SensorStore) -> bytes:
         ("battery_percent", "Battery charge in percent.", ("battery", "battery_percent")),
         ("rssi_dbm", "Bluetooth received signal strength in dBm.", ("__rssi__",)),
     )
+    binary_definitions = (
+        ("presence", "Human/person presence state (1 present, 0 absent).", "presence"),
+        ("motion", "Motion detection state (1 detected, 0 clear).", "motion"),
+        ("occupancy", "Occupancy state (1 occupied, 0 unoccupied).", "occupancy"),
+        ("moving", "Moving state (1 moving, 0 stationary).", "moving"),
+    )
     for metric, help_text, _ in definitions:
+        lines.extend((f"# HELP ble_sensors_{metric} {help_text}", f"# TYPE ble_sensors_{metric} gauge"))
+    for metric, help_text, _ in binary_definitions:
         lines.extend((f"# HELP ble_sensors_{metric} {help_text}", f"# TYPE ble_sensors_{metric} gauge"))
     for address, payload in sorted(devices.items()):
         labels = ",".join((
@@ -49,11 +60,17 @@ def render(store: SensorStore) -> bytes:
             f'model="{_escape(payload.get("model"))}"',
             f'protocol="{_escape(payload.get("protocol"))}"',
         ))
-        lines.append(f"ble_sensors_up{{{labels}}} 1")
+        stale = bool(payload.get("stale"))
+        lines.append(f"ble_sensors_up{{{labels}}} {0 if stale else 1}")
+        lines.append(f"ble_sensors_stale{{{labels}}} {1 if stale else 0}")
         for metric, _, names in definitions:
             value = payload.get("rssi") if names == ("__rssi__",) else find_number(payload, *names)
             if isinstance(value, (int, float)):
                 lines.append(f"ble_sensors_{metric}{{{labels}}} {value}")
+        for metric, _, device_class in binary_definitions:
+            value = find_binary(payload, device_class)
+            if value is not None:
+                lines.append(f"ble_sensors_{metric}{{{labels}}} {1 if value else 0}")
         for key, unit, value in scalar_values(payload):
             extra = f'{labels},key="{_escape(key)}",unit="{_escape(unit)}"'
             if isinstance(value, bool):

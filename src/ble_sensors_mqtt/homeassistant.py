@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .binary import binary_device_class, coerce_binary
 from .version import __version__
 
 _MAX_DEPTH = 5
@@ -157,16 +158,26 @@ def discovery_messages(
         seen.add(path)
         leaf = path[-1]
         metadata = _metadata_for(path, value)
+        binary_class = binary_device_class(leaf) if coerce_binary(value) is not None else None
+        domain = "binary_sensor" if binary_class else "sensor"
         unique_id = f"ble_sensors_mqtt_{device_id}_{_entity_id(path)}"
         object_id = f"{device_id}_{_slug('_'.join(path), limit=64)}"
-        config_topic = f"{discovery_prefix}/sensor/{device_id}/{_entity_id(path)}/config"
+        config_topic = f"{discovery_prefix}/{domain}/{device_id}/{_entity_id(path)}/config"
         source_path = ("rssi",) if path == ("rssi",) else ("data", *path)
+        raw_template = "value_json" + _jinja_path(source_path)
+        value_template = "{{ " + raw_template + " }}"
+        if binary_class:
+            value_template = (
+                "{% set v = " + raw_template + " %}"
+                "{{ 'ON' if v == true or v == 1 or (v|string|lower) in "
+                "['true','on','yes','active','detected','present','occupied','moving'] else 'OFF' }}"
+            )
         config: dict[str, Any] = {
             "name": _friendly_name(leaf),
             "object_id": object_id,
             "unique_id": unique_id,
             "state_topic": state_topic,
-            "value_template": "{{ value_json" + _jinja_path(source_path) + " }}",
+            "value_template": value_template,
             "availability_topic": availability_topic,
             "payload_available": "online",
             "payload_not_available": "offline",
@@ -178,15 +189,20 @@ def discovery_messages(
             },
             "entity_category": "diagnostic" if leaf.lower() in {"rssi", "software_version", "hardware_version"} else None,
         }
-        unit = _unit_for(payload, path, metadata)
-        if unit:
-            config["unit_of_measurement"] = unit
-        if metadata.device_class:
-            config["device_class"] = metadata.device_class
-        if metadata.state_class:
-            config["state_class"] = metadata.state_class
-        if metadata.icon:
-            config["icon"] = metadata.icon
+        if binary_class:
+            config["device_class"] = binary_class
+            config["payload_on"] = "ON"
+            config["payload_off"] = "OFF"
+        if not binary_class:
+            unit = _unit_for(payload, path, metadata)
+            if unit:
+                config["unit_of_measurement"] = unit
+            if metadata.device_class:
+                config["device_class"] = metadata.device_class
+            if metadata.state_class:
+                config["state_class"] = metadata.state_class
+            if metadata.icon:
+                config["icon"] = metadata.icon
         config = {key: item for key, item in config.items() if item is not None}
         messages[config_topic] = json.dumps(
             config, ensure_ascii=False, separators=(",", ":"), sort_keys=True
@@ -215,6 +231,30 @@ def discovery_messages(
     messages[protocol_topic] = json.dumps(
         protocol_config, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     ).encode("utf-8")
+
+    if "stale" in payload:
+        stale_path = ("stale",)
+        stale_topic = f"{discovery_prefix}/sensor/{device_id}/{_entity_id(stale_path)}/config"
+        stale_config = {
+            "name": "Stale",
+            "object_id": f"{device_id}_stale",
+            "unique_id": f"ble_sensors_mqtt_{device_id}_{_entity_id(stale_path)}",
+            "state_topic": state_topic,
+            "value_template": "{{ 1 if value_json.get(\"stale\", false) else 0 }}",
+            "availability_topic": availability_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "device": device,
+            "entity_category": "diagnostic",
+            "origin": {
+                "name": "ble-sensors-mqtt",
+                "sw_version": __version__,
+                "support_url": "https://github.com/desalvo/ble-sensors-mqtt",
+            },
+        }
+        messages[stale_topic] = json.dumps(
+            stale_config, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
     return messages
 
 

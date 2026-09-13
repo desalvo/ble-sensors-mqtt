@@ -13,6 +13,7 @@ import math
 import os
 import re
 import signal
+import socket
 import ssl
 import stat
 import sys
@@ -28,6 +29,13 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
+from .config import (
+    cli_defaults,
+    deep_merge,
+    default_config_path,
+    default_frontend_data_dir,
+    load_config,
+)
 from .metrics import SensorStore
 from .plugin_api import SensorReading
 from .version import __version__
@@ -57,6 +65,27 @@ def mqtt_port(value: str) -> int:
     if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError("must be between 1 and 65535")
     return port
+
+
+def byte_size(value: str) -> int:
+    """Parse an integer byte count or a KiB/MiB/GiB/TiB suffix."""
+    candidate = value.strip().lower()
+    match = re.fullmatch(r"([0-9]+)([kmgt]i?b?|b)?", candidate)
+    if not match:
+        raise argparse.ArgumentTypeError("use bytes or a size such as 512MiB or 1GiB")
+    amount = int(match.group(1))
+    suffix = match.group(2) or "b"
+    multipliers = {
+        "b": 1,
+        "k": 1024, "kb": 1000, "kib": 1024,
+        "m": 1024**2, "mb": 1000**2, "mib": 1024**2,
+        "g": 1024**3, "gb": 1000**3, "gib": 1024**3,
+        "t": 1024**4, "tb": 1000**4, "tib": 1024**4,
+    }
+    parsed = amount * multipliers[suffix]
+    if not 1_048_576 <= parsed <= 1_099_511_627_776:
+        raise argparse.ArgumentTypeError("size must be between 1 MiB and 1 TiB")
+    return parsed
 
 
 def bind_address(value: str) -> str:
@@ -151,6 +180,10 @@ def apply_device_names(
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument(
+        "--config", type=Path,
+        help="application TOML configuration; CLI options override file values",
+    )
     result.add_argument("--scan", action="store_true", help="discover nearby devices and exit")
     result.add_argument("--list-plugins", action="store_true", help="list plugins and exit")
     result.add_argument("--cloud-help", action="store_true", help="show cloud setup help and exit")
@@ -164,6 +197,10 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--cloud-config", type=Path, help="cloud provider TOML configuration")
     result.add_argument("--scan-duration", type=positive_seconds, default=8.0)
+    result.add_argument(
+        "--bluetooth-adapter", metavar="ADAPTER",
+        help="Linux BlueZ adapter name/address (for example hci1); omit for OS default",
+    )
     result.add_argument("--poll-interval", type=positive_seconds, default=30.0)
     result.add_argument("--plugin-timeout", type=positive_seconds, default=15.0, help="maximum seconds for one plugin decode/cloud poll")
     result.add_argument(
@@ -184,7 +221,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--mqtt-host", help="broker hostname or IP address")
     result.add_argument("--mqtt-port", type=mqtt_port, default=None)
-    result.add_argument("--mqtt-client-id", default=f"ble-sensors-mqtt-{os.uname().nodename}")
+    result.add_argument("--mqtt-client-id", default=f"ble-sensors-mqtt-{socket.gethostname()}")
     result.add_argument("--mqtt-topic-prefix", type=topic_prefix, default="ble-sensors")
     result.add_argument(
         "--home-assistant-discovery", action="store_true",
@@ -202,6 +239,22 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--mqtt-ca-file", type=Path)
     result.add_argument("--mqtt-connect-timeout", type=positive_seconds, default=15.0)
     result.add_argument("--allow-insecure-mqtt", action="store_true", help="explicitly allow plaintext MQTT (required with credentials or remote brokers)")
+    result.add_argument(
+        "--mqtt-cache", action=argparse.BooleanOptionalAction, default=True,
+        help="persist MQTT messages on disk while the broker is unavailable (default: enabled)",
+    )
+    result.add_argument(
+        "--mqtt-cache-path", type=Path,
+        help="SQLite MQTT cache path; defaults beside --state-file or under the user state directory",
+    )
+    result.add_argument(
+        "--mqtt-cache-max-size", type=byte_size, default=1024**3, metavar="SIZE",
+        help="maximum logical MQTT cache size (default: 1GiB)",
+    )
+    result.add_argument(
+        "--reuse-stale-data", action="store_true",
+        help="reuse the previous reading with stale=true when a sensor is missing or has no data",
+    )
     result.add_argument("--retain", action=argparse.BooleanOptionalAction, default=True)
     result.add_argument("--stale-cycles", type=int, default=3, metavar="N", help="clear retained sensor state after N consecutive missing cycles")
     result.add_argument("--state-file", type=Path, help="persist retained-topic cleanup state across restarts")
@@ -222,6 +275,13 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--snmp-community-file", type=Path)
     result.add_argument("--snmp-base-oid", default="1.3.6.1.4.1.32473.1.1")
     result.add_argument("--allow-external-snmp", action="store_true", help="allow plaintext SNMPv2c on a non-loopback address")
+    result.add_argument("--frontend", action="store_true", help="enable the authenticated web frontend")
+    result.add_argument("--frontend-host", type=bind_address, default="127.0.0.1", metavar="IP")
+    result.add_argument("--frontend-port", type=mqtt_port, default=8080)
+    result.add_argument("--frontend-data-dir", type=Path, help="frontend user/authentication state directory")
+    result.add_argument("--frontend-tls-cert", type=Path, help="HTTPS certificate PEM for the frontend")
+    result.add_argument("--frontend-tls-key", type=Path, help="HTTPS private key PEM for the frontend")
+    result.add_argument("--allow-external-frontend", action="store_true", help="allow the authenticated frontend to listen on a non-loopback address")
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return result
 
@@ -300,11 +360,13 @@ def reading_payload(reading: SensorReading) -> dict[str, Any]:
 def load_cloud_config(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
+    if path.is_symlink():
+        raise ValueError("configuration must not be a symlink")
     info = path.stat()
     if not stat.S_ISREG(info.st_mode):
         raise ValueError("configuration must be stored in a regular file")
     mode = info.st_mode & 0o777
-    if mode & 0o027:
+    if os.name == "posix" and mode & 0o027:
         raise ValueError("configuration must have permissions 0640 or more restrictive")
     with path.open("rb") as handle:
         config = tomllib.load(handle)
@@ -336,7 +398,7 @@ def load_bindkeys(config: dict[str, Any]) -> dict[str, dict[str, bytes]]:
 
 async def discover_with_plugins(
     duration: float, enabled: set[str] | None, cloud_config: dict[str, Any] | None,
-    plugin_timeout: float = 15.0,
+    plugin_timeout: float = 15.0, bluetooth_adapter: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     from .plugins import load_plugins
     from .scanner import scan
@@ -345,7 +407,7 @@ async def discover_with_plugins(
     plugins, unavailable = load_plugins(enabled, load_bindkeys(config))
     for name, reason in unavailable.items():
         LOG.info("plugin %s was not loaded: %s", name, reason)
-    readings = await scan(duration, plugins, decode_timeout=plugin_timeout)
+    readings = await scan(duration, plugins, decode_timeout=plugin_timeout, adapter=bluetooth_adapter)
 
     from .cloud import load_cloud_plugins
 
@@ -385,6 +447,51 @@ def topic_part(address: str) -> str:
     digest = hashlib.sha256(address.encode("utf-8")).hexdigest()[:12]
     return f"{normalized[:110]}_{digest}"
 
+
+
+def mqtt_cache_path(args: argparse.Namespace) -> Path:
+    if args.mqtt_cache_path is not None:
+        return args.mqtt_cache_path
+    if args.state_file is not None:
+        return args.state_file.with_name("mqtt-cache.sqlite3")
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        state_home = os.environ.get("XDG_STATE_HOME")
+        base = Path(state_home) if state_home else Path.home() / ".local" / "state"
+    return base / "ble-sensors-mqtt" / "mqtt-cache.sqlite3"
+
+
+def has_sensor_data(payload: dict[str, Any]) -> bool:
+    data = payload.get("data")
+    return isinstance(data, dict) and bool(data)
+
+
+def apply_stale_fallback(
+    current: dict[str, dict[str, Any]],
+    previous: dict[str, dict[str, Any]],
+    enabled: bool,
+) -> dict[str, dict[str, Any]]:
+    if not enabled:
+        return {address: dict(payload) for address, payload in current.items()}
+    fresh: dict[str, dict[str, Any]] = {}
+    for address, payload in current.items():
+        if not has_sensor_data(payload) and address in previous:
+            stale = dict(previous[address])
+            stale["stale"] = True
+            fresh[address] = stale
+        else:
+            normalized = dict(payload)
+            normalized["stale"] = False
+            fresh[address] = normalized
+    for address, payload in previous.items():
+        if address not in fresh:
+            stale = dict(payload)
+            stale["stale"] = True
+            fresh[address] = stale
+    return fresh
 
 
 def load_runtime_state(path: Path | None, prefix: str) -> tuple[set[str], dict[str, int]]:
@@ -429,7 +536,8 @@ def save_runtime_state(
         raise ValueError("runtime state exceeds 1 MiB")
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb", closefd=False) as handle:
             handle.write(encoded)
             handle.flush()
@@ -466,6 +574,8 @@ def make_client(args: argparse.Namespace) -> mqtt.Client:
 
 
 def read_secret(path: Path, description: str) -> str:
+    if path.is_symlink():
+        raise ValueError(f"{description} cannot be opened securely: symlinks are not allowed")
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
@@ -476,7 +586,7 @@ def read_secret(path: Path, description: str) -> str:
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f"{description} must be stored in a regular file")
         mode = info.st_mode & 0o777
-        if mode & 0o027:
+        if os.name == "posix" and mode & 0o027:
             raise ValueError(f"{description} must have permissions 0640 or more restrictive")
         with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
             value = handle.read(513).strip()
@@ -506,24 +616,34 @@ def validate_runtime_security(args: argparse.Namespace) -> None:
         raise ValueError(
             "external SNMPv2c binding requires --allow-external-snmp because SNMPv2c is plaintext"
         )
+    if args.frontend and is_external_bind(args.frontend_host) and not args.allow_external_frontend:
+        raise ValueError("external frontend binding requires --allow-external-frontend")
+    if args.frontend and bool(args.frontend_tls_cert) != bool(args.frontend_tls_key):
+        raise ValueError("--frontend-tls-cert and --frontend-tls-key must be used together")
+    if args.frontend and is_external_bind(args.frontend_host) and not args.frontend_tls_cert:
+        LOG.warning("frontend is externally reachable without HTTPS; use a TLS reverse proxy or --frontend-tls-cert/--frontend-tls-key")
 
 
 async def bridge(args: argparse.Namespace) -> int:
     validate_runtime_security(args)
 
-    allowed = set(args.device)
-    aliases = name_map(args.device_name + args.sensor_name)
-    cloud_config = load_cloud_config(args.cloud_config)
-    enabled = set(args.plugin) or None
+    from .mqtt_cache import MQTTCache
+
+    # Sensor selection/aliases/plugin set are recomputed each cycle so the web frontend can
+    # apply those values live without restarting the daemon.
     prefix = args.mqtt_topic_prefix
     client = make_client(args)
     port = args.mqtt_port or (8883 if args.mqtt_tls else 1883)
     connected = threading.Event()
+    cache = MQTTCache(mqtt_cache_path(args), args.mqtt_cache_max_size) if args.mqtt_cache else None
 
     def on_connect(_client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any) -> None:
         if reason_code == 0:
             connected.set()
             LOG.info("connected to MQTT broker %s:%d", args.mqtt_host, port)
+            status = _client.publish(f"{prefix}/bridge/status", "online", qos=1, retain=True)
+            if status.rc != mqtt.MQTT_ERR_SUCCESS:
+                LOG.warning("failed to queue MQTT online status: rc=%s", status.rc)
         else:
             connected.clear()
             LOG.error("MQTT broker rejected connection: %s", reason_code)
@@ -537,20 +657,83 @@ async def bridge(args: argparse.Namespace) -> int:
     client.on_disconnect = on_disconnect
     client.reconnect_delay_set(min_delay=1, max_delay=30)
     client.will_set(f"{prefix}/bridge/status", "offline", qos=1, retain=True)
-    client.connect(args.mqtt_host, port, keepalive=60)
+    client.connect_async(args.mqtt_host, port, keepalive=60)
     client.loop_start()
     if not await asyncio.to_thread(connected.wait, args.mqtt_connect_timeout):
-        client.loop_stop()
-        client.disconnect()
-        raise OSError(f"MQTT CONNACK was not received within {args.mqtt_connect_timeout:.1f}s")
-    online = client.publish(f"{prefix}/bridge/status", "online", qos=1, retain=True)
-    if online.rc != mqtt.MQTT_ERR_SUCCESS:
-        raise OSError(f"failed to queue MQTT online status: rc={online.rc}")
-    online.wait_for_publish(args.mqtt_connect_timeout)
+        if cache is None:
+            client.loop_stop()
+            client.disconnect()
+            raise OSError(
+                f"MQTT CONNACK was not received within {args.mqtt_connect_timeout:.1f}s"
+            )
+        LOG.warning(
+            "MQTT broker unavailable at startup; polling will continue and messages will be cached at %s",
+            cache.path,
+        )
+
+    def publish_confirmed(topic: str, payload: bytes | str, qos: int, retain: bool) -> None:
+        if not connected.is_set():
+            raise OSError("MQTT broker is not connected")
+        info = client.publish(topic, payload, qos=qos, retain=retain)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise OSError(f"MQTT publish was not queued for {topic}: rc={info.rc}")
+        info.wait_for_publish(args.mqtt_connect_timeout)
+        if not info.is_published():
+            raise TimeoutError(f"MQTT publish acknowledgement timed out for {topic}")
+
+    def cache_message(topic: str, payload: bytes, qos: int, retain: bool) -> None:
+        if cache is None:
+            raise OSError("MQTT broker is unavailable and disk cache is disabled")
+        dropped, dropped_bytes = cache.enqueue(topic, payload, qos, retain)
+        if dropped:
+            LOG.warning(
+                "MQTT cache limit reached; dropped %d oldest messages (%d bytes)",
+                dropped,
+                dropped_bytes,
+            )
+
+    def publish_or_cache(topic: str, payload: bytes | str, qos: int, retain: bool) -> bool:
+        encoded = payload.encode("utf-8") if isinstance(payload, str) else payload
+        try:
+            publish_confirmed(topic, encoded, qos, retain)
+            return True
+        except (OSError, TimeoutError, RuntimeError) as exc:
+            cache_message(topic, encoded, qos, retain)
+            LOG.warning("MQTT publish deferred to disk cache for %s: %s", topic, exc)
+            return False
+
+    def flush_cache() -> int:
+        if cache is None or not connected.is_set():
+            return 0
+        sent = 0
+        while connected.is_set():
+            batch = cache.oldest(256)
+            if not batch:
+                break
+            for message in batch:
+                try:
+                    publish_confirmed(
+                        message.topic, message.payload, message.qos, message.retain
+                    )
+                except (OSError, TimeoutError, RuntimeError) as exc:
+                    LOG.warning("MQTT cache flush paused: %s", exc)
+                    return sent
+                cache.delete(message.id)
+                sent += 1
+        if sent:
+            remaining, remaining_bytes = cache.stats()
+            LOG.info(
+                "flushed %d MQTT cached messages; %d messages / %d bytes remain",
+                sent,
+                remaining,
+                remaining_bytes,
+            )
+        return sent
 
     store = SensorStore()
     prometheus_server = None
     snmp_transport = None
+    frontend_server = None
     if args.prometheus:
         from .prometheus import start as start_prometheus
 
@@ -565,6 +748,12 @@ async def bridge(args: argparse.Namespace) -> int:
         snmp_transport = await start_snmp(
             store, args.snmp_host, args.snmp_port, community, args.snmp_base_oid
         )
+    if args.frontend:
+        from .frontend import start_frontend
+        config_path = args.config or default_config_path()
+        frontend_server = start_frontend(store, args, config_path, cache)
+        scheme = "https" if args.frontend_tls_cert else "http"
+        LOG.info("frontend available at %s://%s:%d", scheme, args.frontend_host, args.frontend_port)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -577,21 +766,44 @@ async def bridge(args: argparse.Namespace) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         LOG.warning("runtime state could not be loaded and will be rebuilt: %s", exc)
         previously_published, missing_cycles = set(), {}
+
+    previous_exported: dict[str, dict[str, Any]] = {}
     try:
         while not stop.is_set():
             started = time.monotonic()
             try:
+                if connected.is_set():
+                    flush_cache()
+
+                allowed = set(args.device)
+                aliases = name_map(args.device_name + args.sensor_name)
+                enabled = set(args.plugin) or None
+                cloud_config = load_cloud_config(args.cloud_config)
                 devices = apply_device_names(
                     await discover_with_plugins(
-                        args.scan_duration, enabled, cloud_config, args.plugin_timeout
+                        args.scan_duration, enabled, cloud_config, args.plugin_timeout,
+                        args.bluetooth_adapter,
                     ),
                     aliases,
                 )
-                exported = {
+                current_exported = {
                     address: payload
                     for address, payload in devices.items()
                     if not allowed or address in allowed
                 }
+                exported = apply_stale_fallback(
+                    current_exported, previous_exported, args.reuse_stale_data
+                )
+                previous_exported = {
+                    address: dict(payload)
+                    for address, payload in exported.items()
+                    if not payload.get("stale")
+                } | {
+                    address: dict(previous_exported[address])
+                    for address, payload in exported.items()
+                    if payload.get("stale") and address in previous_exported
+                }
+
                 store.replace(exported)
                 current_topics: set[str] = set()
                 current_discovery_topics: set[str] = set()
@@ -605,10 +817,7 @@ async def bridge(args: argparse.Namespace) -> int:
                         raise ValueError(
                             f"MQTT payload for {address} exceeds {MAX_JSON_PAYLOAD} bytes"
                         )
-                    info = client.publish(topic, encoded, qos=args.qos, retain=args.retain)
-                    if info.rc != mqtt.MQTT_ERR_SUCCESS:
-                        raise OSError(f"publish was not queued for {address}: rc={info.rc}")
-                    info.wait_for_publish(args.mqtt_connect_timeout)
+                    publish_or_cache(topic, encoded, args.qos, args.retain)
                     missing_cycles.pop(topic, None)
 
                     if args.home_assistant_discovery:
@@ -622,42 +831,25 @@ async def bridge(args: argparse.Namespace) -> int:
                         )
                         for config_topic, config_payload in sorted(configs.items()):
                             current_discovery_topics.add(config_topic)
-                            discovery_info = client.publish(
-                                config_topic, config_payload, qos=1, retain=True
-                            )
-                            if discovery_info.rc != mqtt.MQTT_ERR_SUCCESS:
-                                raise OSError(
-                                    f"Home Assistant discovery publish was not queued for {address}: "
-                                    f"rc={discovery_info.rc}"
-                                )
-                            discovery_info.wait_for_publish(args.mqtt_connect_timeout)
+                            publish_or_cache(config_topic, config_payload, 1, True)
                             missing_cycles.pop(config_topic, None)
 
                 previous_discovery_topics = {
                     topic for topic in previously_published if topic.endswith("/config")
                 }
                 for stale_discovery_topic in previous_discovery_topics - current_discovery_topics:
-                    discovery_info = client.publish(
-                        stale_discovery_topic, b"", qos=1, retain=True
-                    )
-                    if discovery_info.rc == mqtt.MQTT_ERR_SUCCESS:
-                        discovery_info.wait_for_publish(args.mqtt_connect_timeout)
-                        missing_cycles.pop(stale_discovery_topic, None)
-                        LOG.info(
-                            "cleared stale Home Assistant discovery topic %s",
-                            stale_discovery_topic,
-                        )
+                    publish_or_cache(stale_discovery_topic, b"", 1, True)
+                    missing_cycles.pop(stale_discovery_topic, None)
+                    LOG.info("cleared or queued stale Home Assistant discovery topic %s", stale_discovery_topic)
 
                 if args.retain:
                     for topic in (previously_published - current_topics) - previous_discovery_topics:
                         misses = missing_cycles.get(topic, 0) + 1
                         missing_cycles[topic] = misses
                         if misses >= args.stale_cycles:
-                            info = client.publish(topic, b"", qos=args.qos, retain=True)
-                            if info.rc == mqtt.MQTT_ERR_SUCCESS:
-                                info.wait_for_publish(args.mqtt_connect_timeout)
-                                missing_cycles.pop(topic, None)
-                                LOG.info("cleared stale retained MQTT topic %s", topic)
+                            publish_or_cache(topic, b"", args.qos, True)
+                            missing_cycles.pop(topic, None)
+                            LOG.info("cleared or queued stale retained MQTT topic %s", topic)
                     previously_published = (
                         current_topics | current_discovery_topics | set(missing_cycles)
                     )
@@ -666,7 +858,12 @@ async def bridge(args: argparse.Namespace) -> int:
 
                 save_runtime_state(args.state_file, prefix, previously_published, missing_cycles)
                 store.mark_success()
-                LOG.info("polling cycle completed: %d sensors exported", len(exported))
+                stale_count = sum(bool(payload.get("stale")) for payload in exported.values())
+                LOG.info(
+                    "polling cycle completed: %d sensors exported (%d stale)",
+                    len(exported),
+                    stale_count,
+                )
             except Exception as exc:
                 store.mark_failure(str(exc))
                 LOG.exception("polling cycle failed; retrying at the next interval")
@@ -681,12 +878,15 @@ async def bridge(args: argparse.Namespace) -> int:
             prometheus_server.server_close()
         if snmp_transport:
             snmp_transport.close()
+        if frontend_server:
+            frontend_server.shutdown()
         if connected.is_set():
-            offline = client.publish(f"{prefix}/bridge/status", "offline", qos=1, retain=True)
-            if offline.rc == mqtt.MQTT_ERR_SUCCESS:
-                offline.wait_for_publish(3)
+            with contextlib.suppress(OSError, TimeoutError, RuntimeError):
+                publish_confirmed(f"{prefix}/bridge/status", b"offline", 1, True)
         client.disconnect()
         client.loop_stop()
+        if cache is not None:
+            cache.close()
     return 0
 
 
@@ -715,7 +915,8 @@ async def async_main(args: argparse.Namespace) -> int:
     aliases = name_map(args.device_name + args.sensor_name)
     if args.scan:
         devices = apply_device_names(await discover_with_plugins(
-            args.scan_duration, set(args.plugin) or None, load_cloud_config(args.cloud_config)
+            args.scan_duration, set(args.plugin) or None, load_cloud_config(args.cloud_config),
+            bluetooth_adapter=args.bluetooth_adapter,
         ), aliases)
         print(json.dumps(list(devices.values()), indent=2, ensure_ascii=False))
         return 0
@@ -728,8 +929,53 @@ async def async_main(args: argparse.Namespace) -> int:
     return await bridge(args)
 
 
+def _configured_parser(argv: list[str] | None) -> tuple[argparse.ArgumentParser, list[str]]:
+    actual = list(sys.argv[1:] if argv is None else argv)
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("--config", type=Path)
+    known, _ = bootstrap.parse_known_args(actual)
+    config_path = known.config or default_config_path()
+    config = load_config(config_path, required=known.config is not None)
+    frontend_cfg = config.get("frontend", {}) if isinstance(config.get("frontend", {}), dict) else {}
+    data_dir_value = frontend_cfg.get("data_dir") or default_frontend_data_dir()
+    runtime_override = Path(str(data_dir_value)).expanduser() / "runtime-config.toml"
+    if runtime_override.exists():
+        config = deep_merge(config, load_config(runtime_override, required=True))
+    defaults = cli_defaults(config)
+
+    # Programmatic argparse defaults do not pass through ``type=`` converters.
+    if "device" in defaults:
+        defaults["device"] = [sensor_identifier(str(item)) for item in defaults["device"]]
+    if "device_name" in defaults:
+        defaults["device_name"] = [device_name(str(item)) for item in defaults["device_name"]]
+    if "sensor_name" in defaults:
+        defaults["sensor_name"] = [sensor_name(str(item)) for item in defaults["sensor_name"]]
+    if isinstance(defaults.get("mqtt_cache_max_size"), str):
+        defaults["mqtt_cache_max_size"] = byte_size(defaults["mqtt_cache_max_size"])
+    if "mqtt_topic_prefix" in defaults:
+        defaults["mqtt_topic_prefix"] = topic_prefix(str(defaults["mqtt_topic_prefix"]))
+    if "home_assistant_discovery_prefix" in defaults:
+        defaults["home_assistant_discovery_prefix"] = topic_prefix(
+            str(defaults["home_assistant_discovery_prefix"])
+        )
+    for key in ("prometheus_host", "snmp_host", "frontend_host"):
+        if key in defaults:
+            defaults[key] = bind_address(str(defaults[key]))
+
+    configured = parser()
+    configured.set_defaults(**defaults)
+    if known.config is None and config:
+        configured.set_defaults(config=config_path)
+    return configured, actual
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    try:
+        configured, actual = _configured_parser(argv)
+        args = configured.parse_args(actual)
+    except (ValueError, OSError, argparse.ArgumentTypeError) as exc:
+        LOG.error("%s", exc)
+        return 2
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

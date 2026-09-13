@@ -96,3 +96,50 @@ def test_unique_ids_do_not_depend_on_friendly_name():
     assert {json.loads(v)["unique_id"] for v in a.values()} == {
         json.loads(v)["unique_id"] for v in b.values()
     }
+
+
+def test_stale_diagnostic_entity_is_exposed_when_feature_marks_payload():
+    payload = sample_payload()
+    payload["stale"] = True
+    messages = discovery_messages(
+        discovery_prefix="homeassistant",
+        mqtt_prefix="ble-sensors",
+        address="AA:BB:CC:DD:EE:FF",
+        payload=payload,
+    )
+    decoded = [json.loads(item) for item in messages.values()]
+    stale = next(item for item in decoded if item["name"] == "Stale")
+    assert stale["entity_category"] == "diagnostic"
+    assert 'value_json.get("stale", false)' in stale["value_template"]
+
+
+def test_presence_motion_occupancy_are_binary_sensors():
+    payload = sample_payload()
+    payload["data"].update({
+        "presence": True,
+        "motion": False,
+        "occupancy": 1,
+        "moving": "false",
+        "moveDetected": True,
+    })
+    messages = discovery_messages(
+        discovery_prefix="homeassistant",
+        mqtt_prefix="ble-sensors",
+        address="AA:BB:CC:DD:EE:FF",
+        payload=payload,
+    )
+    decoded = {topic: json.loads(value) for topic, value in messages.items()}
+    expected = {
+        "Presence": "presence",
+        "Motion": "motion",
+        "Occupancy": "occupancy",
+        "Moving": "moving",
+        "Movedetected": "motion",
+    }
+    for name, device_class in expected.items():
+        topic, config = next((topic, config) for topic, config in decoded.items() if config["name"] == name)
+        assert topic.startswith("homeassistant/binary_sensor/")
+        assert config["device_class"] == device_class
+        assert config["payload_on"] == "ON"
+        assert config["payload_off"] == "OFF"
+        assert "'ON'" in config["value_template"]
