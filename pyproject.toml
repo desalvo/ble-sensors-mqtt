@@ -57,7 +57,7 @@ dev = [
   "pip-audit>=2.10,<3",
   "pytest>=9.0,<10",
   "pytest-cov>=7,<8",
-  "reportlab>=4.2,<5",
+  "reportlab>=4.2,<6",
   "ruff>=0.12,<1",
 ]
 native = ["pyinstaller>=6.16,<7", "pywin32>=311; platform_system == 'Windows'"]
