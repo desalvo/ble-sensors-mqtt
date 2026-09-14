@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
-{% block title %}User MFA · ble-sensors-mqtt{% endblock %}
+{% block title %}User MFA · BLE Sensors MQTT{% endblock %}
 {% block page_eyebrow %}MFA MANAGEMENT{% endblock %}
 {% block page_heading %}MFA · {{ user.username }}{% endblock %}
-{% block page_subtitle %}Share or export the TOTP seed when the same MFA identity must intentionally work across multiple ble-sensors-mqtt instances.{% endblock %}
+{% block page_subtitle %}Share or export the TOTP seed when the same MFA identity must intentionally work across multiple BLE Sensors MQTT instances.{% endblock %}
+{% block page_header_image %}{{ url_for('static', filename='user-mfa-page-hero.png') }}{% endblock %}
+{% block page_header_alt %}Photographic overview of user MFA enrollment and secure identity sharing in BLE Sensors MQTT{% endblock %}
 {% block content %}<div class="center-card panel"><label>Secret<input readonly value="{{secret}}"></label><label>Authenticator URI<textarea readonly rows="4">{{uri}}</textarea></label><form method="post" class="inline-form"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><button name="action" value="enable">Enable</button><button class="danger" name="action" value="disable">Disable</button></form><p class="hint">The encrypted full backup also contains this seed, allowing deliberate MFA replication to another instance.</p></div>{% endblock %}

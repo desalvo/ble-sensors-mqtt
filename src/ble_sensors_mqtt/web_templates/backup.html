@@ -1,7 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}Backup / Restore · ble-sensors-mqtt{% endblock %}
+{% block title %}Backup / Restore · BLE Sensors MQTT{% endblock %}
 {% block page_eyebrow %}PROTECTED RECOVERY{% endblock %}
 {% block page_heading %}Backup / Restore{% endblock %}
 {% block page_subtitle %}Create encrypted exports of configuration, users, MFA, cache and history, or restore them from a protected backup archive.{% endblock %}
+{% block page_header_image %}{{ url_for('static', filename='backup-page-hero.png') }}{% endblock %}
+{% block page_header_alt %}Photographic overview of secure backup and restore workflows in BLE Sensors MQTT{% endblock %}
 {% block content %}
 <div class="two-col"><form method="post" class="panel"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="action" value="export"><h2>Export</h2><label>Backup passphrase<input type="password" name="password" minlength="10" required></label><p class="hint">The backup can contain password hashes and MFA seeds; encryption is mandatory.</p><button>Download encrypted backup</button></form><form method="post" enctype="multipart/form-data" class="panel"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="action" value="import"><h2>Import</h2><label>Backup file<input type="file" name="backup" accept=".bsmqbackup" required></label><label>Backup passphrase<input type="password" name="password" minlength="10" required></label><button>Import and restore</button></form></div>{% endblock %}

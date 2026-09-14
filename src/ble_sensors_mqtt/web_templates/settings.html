@@ -1,8 +1,10 @@
 {% extends 'base.html' %}
-{% block title %}Configuration · ble-sensors-mqtt{% endblock %}
+{% block title %}Configuration · BLE Sensors MQTT{% endblock %}
 {% block page_eyebrow %}RUNTIME CONTROL{% endblock %}
 {% block page_heading %}Configuration{% endblock %}
 {% block page_subtitle %}Tune Bluetooth, runtime, frontend and monitoring settings. Immediate changes apply live where possible; service-level changes remain persistent and restart-aware.{% endblock %}
+{% block page_header_image %}{{ url_for('static', filename='settings-page-hero.png') }}{% endblock %}
+{% block page_header_alt %}Photographic overview of BLE Sensors MQTT runtime configuration and protocol settings{% endblock %}
 {% block content %}
 <div class="tabs">
   {% for section, values in config.items() if values is mapping and section not in ['frontend'] %}

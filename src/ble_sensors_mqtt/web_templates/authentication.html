@@ -1,7 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}LDAP / SSO · ble-sensors-mqtt{% endblock %}
+{% block title %}LDAP / SSO · BLE Sensors MQTT{% endblock %}
 {% block page_eyebrow %}ENTERPRISE IDENTITY{% endblock %}
 {% block page_heading %}LDAP / SSO{% endblock %}
 {% block page_subtitle %}Configure LDAP and OpenID Connect providers while keeping recovery access and protected secret-file references under control.{% endblock %}
+{% block page_header_image %}{{ url_for('static', filename='authentication-page-hero.png') }}{% endblock %}
+{% block page_header_alt %}Photographic overview of secure LDAP and single sign-on integration in BLE Sensors MQTT{% endblock %}
 {% block content %}
 <div class="two-col">{% for provider in ['ldap','oidc'] %}<form method="post" class="panel"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="provider" value="{{provider}}"><h2>{{'LDAP' if provider=='ldap' else 'OIDC / SSO'}}</h2>{% for key,value in frontend.get(provider,{}).items() %}<label>{{key.replace('_',' ')|title}}{% if value is sameas true or value is sameas false %}<select name="{{key}}"><option value="true" {{'selected' if value}}>Enabled</option><option value="false" {{'selected' if not value}}>Disabled</option></select>{% else %}<input name="{{key}}" value="{{value}}" {% if 'secret' in key or 'password' in key %}autocomplete="off"{% endif %}>{% endif %}</label>{% endfor %}<button>Save {{provider|upper}}</button></form>{% endfor %}</div><section class="panel"><h2>Authentication behavior</h2><p>Local authentication always remains enabled for recovery. LDAP passwords are verified directly against LDAP and are never stored. LDAP users receive a local shadow profile for role and optional TOTP MFA. OIDC/SSO users receive a shadow profile for role; MFA is normally enforced by the Identity Provider.</p></section>{% endblock %}

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Dashboard · ble-sensors-mqtt{% endblock %}
+{% block title %}Dashboard · BLE Sensors MQTT{% endblock %}
 {% block page_header %}{% endblock %}
 {% block content %}
 <section class="dashboard-hero">
@@ -68,8 +68,8 @@
       <div><strong id="health-state">{{ 'Ready' if health.ready else 'Starting' }}</strong><span>Current state</span></div>
     </div>
   </article>
-  <article class="dashboard-art-card" aria-label="ble-sensors-mqtt visual overview">
-    <img src="{{ url_for('static', filename='dashboard-hero.png') }}" alt="Professional visual overview of the ble-sensors-mqtt sensor dashboard">
+  <article class="dashboard-art-card" aria-label="BLE Sensors MQTT visual overview">
+    <img src="{{ url_for('static', filename='dashboard-hero.png') }}" alt="Professional visual overview of the BLE Sensors MQTT sensor dashboard">
     <div><strong>From BLE packets to useful environmental data</strong><span>MQTT · Home Assistant · Prometheus · SNMP</span></div>
   </article>
 </section>

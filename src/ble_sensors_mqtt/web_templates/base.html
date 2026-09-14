@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}ble-sensors-mqtt{% endblock %}</title>
+  <title>{% block title %}BLE Sensors MQTT{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
 <header>
-  <div class="brand">◉ <span>ble-sensors-mqtt</span></div>
+  <div class="brand">◉ <span>BLE Sensors MQTT</span></div>
   {% if current_user %}
   <nav>
     <a href="{{ url_for('dashboard') }}">Dashboard</a>
@@ -40,11 +40,11 @@
   <section class="panel page-hero-compact">
     <div class="page-hero-copy">
       <span class="eyebrow dark">{% block page_eyebrow %}CONNECTED OPERATIONS{% endblock %}</span>
-      <h1>{% block page_heading %}ble-sensors-mqtt{% endblock %}</h1>
+      <h1>{% block page_heading %}BLE Sensors MQTT{% endblock %}</h1>
       <p>{% block page_subtitle %}Operate your BLE sensor gateway from a secure, responsive console with persistent configuration and monitoring features.{% endblock %}</p>
     </div>
     <div class="page-hero-visual" aria-hidden="true">
-      <img src="{% block page_header_image %}{{ url_for('static', filename='hero.png') }}{% endblock %}" alt="{% block page_header_alt %}Professional ble-sensors-mqtt visual overview{% endblock %}">
+      <img src="{% block page_header_image %}{{ url_for('static', filename='hero.png') }}{% endblock %}" alt="{% block page_header_alt %}Professional BLE Sensors MQTT visual overview{% endblock %}">
     </div>
   </section>
   {% endblock %}

@@ -1,23 +1,30 @@
 {% extends 'base.html' %}
-{% block title %}History · ble-sensors-mqtt{% endblock %}
+{% block title %}History · BLE Sensors MQTT{% endblock %}
 {% block page_eyebrow %}SENSOR HISTORY{% endblock %}
 {% block page_heading %}Historical readings{% endblock %}
 {% block page_subtitle %}Compare one or more sensors in charts or detailed samples, using quick ranges and retained historical values up to {{ retention_days }} days by default.{% endblock %}
+{% block page_header_image %}{{ url_for('static', filename='history-page-hero.png') }}{% endblock %}
+{% block page_header_alt %}Photographic overview of historical sensor readings and charts in BLE Sensors MQTT{% endblock %}
 {% block content %}
 <section class="panel history-controls">
   <form method="get" action="{{ url_for('history_view') }}" id="history-filter-form">
-    <div class="history-filter-grid history-period-grid">
-      <label><span>From</span><input type="datetime-local" name="start" value="{{ start }}"></label>
-      <label><span>To</span><input type="datetime-local" name="end" value="{{ end }}"></label>
-      <label class="toggle-line"><input type="checkbox" name="duplicates" value="1" {% if not deduplicate %}checked{% endif %}><span>Show consecutive duplicates</span></label>
-    </div>
-    <input type="hidden" name="range" id="history-quick-range" value="{{ quick_range }}">
-    <div class="history-quick-ranges" aria-label="Quick history ranges">
-      <span>Quick range</span>
-      {% for preset in quick_ranges %}
-      <button type="button" class="history-quick-range{% if quick_range == preset.key %} active{% endif %}" data-history-range="{{ preset.key }}" data-minutes="{{ preset.minutes }}">{{ preset.label }}</button>
-      {% endfor %}
-    </div>
+    <details class="panel history-collapsible history-section" data-history-section="time-range">
+      <summary><span><span class="eyebrow dark">TIME RANGE</span><strong>Time range</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="history-section-body">
+        <div class="history-filter-grid history-period-grid">
+          <label><span>From</span><input type="datetime-local" name="start" value="{{ start }}"></label>
+          <label><span>To</span><input type="datetime-local" name="end" value="{{ end }}"></label>
+          <label class="toggle-line"><input type="checkbox" name="duplicates" value="1" {% if not deduplicate %}checked{% endif %}><span>Show consecutive duplicates</span></label>
+        </div>
+        <input type="hidden" name="range" id="history-quick-range" value="{{ quick_range }}">
+        <div class="history-quick-ranges" aria-label="Quick history ranges">
+          <span>Quick range</span>
+          {% for preset in quick_ranges %}
+          <button type="button" class="history-quick-range{% if quick_range == preset.key %} active{% endif %}" data-history-range="{{ preset.key }}" data-minutes="{{ preset.minutes }}">{{ preset.label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+    </details>
 
     <details class="panel history-collapsible history-section" data-history-section="sensors">
       <summary><span><span class="eyebrow dark">SENSORS</span><strong>Sensors</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
@@ -97,7 +104,7 @@ function sectionPrefsFromPage() {
 }
 function applySectionPrefs(prefs) {
   const savedSections = prefs && prefs.sections ? prefs.sections : {};
-  const defaults = {sensors:false, series:false, graph:true, table:false, administration:false};
+  const defaults = {"time-range":false, sensors:false, series:false, graph:true, table:false, administration:false};
   historySections.forEach(section => {
     const key = section.dataset.historySection;
     section.open = Object.prototype.hasOwnProperty.call(savedSections, key) ? !!savedSections[key] : !!defaults[key];
