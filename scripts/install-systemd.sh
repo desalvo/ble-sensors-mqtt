@@ -27,6 +27,8 @@ Usage: sudo scripts/install-systemd.sh [options]
   --mqtt-cache-path FILE           default /var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3
   --mqtt-cache-max-size SIZE       default 1GiB
   --reuse-stale-data               reuse previous readings when a sensor is missing
+  --sensor-retry-attempts N        BLE acquisition attempts per polling cycle; default 10
+  --sensor-stale-cycles N          missing cycles before reused data becomes stale; default 10
   --poll-interval SEC              default 30
   --scan-duration SEC              default 8
   --bluetooth-adapter ADAPTER      Linux BlueZ adapter, e.g. hci1
@@ -113,6 +115,8 @@ mqtt_cache=true
 mqtt_cache_path='/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3'
 mqtt_cache_max_size='1GiB'
 reuse_stale_data=false
+sensor_retry_attempts=10
+sensor_stale_cycles=10
 poll_interval=30
 scan_duration=8
 bluetooth_adapter=''
@@ -169,6 +173,8 @@ while (($#)); do
     --mqtt-cache-path) mqtt_cache_path=${2:?}; shift 2 ;;
     --mqtt-cache-max-size) mqtt_cache_max_size=${2:?}; shift 2 ;;
     --reuse-stale-data) reuse_stale_data=true; shift ;;
+    --sensor-retry-attempts) sensor_retry_attempts=${2:?}; shift 2 ;;
+    --sensor-stale-cycles) sensor_stale_cycles=${2:?}; shift 2 ;;
     --poll-interval) poll_interval=${2:?}; shift 2 ;;
     --scan-duration) scan_duration=${2:?}; shift 2 ;;
     --bluetooth-adapter) bluetooth_adapter=${2:?}; shift 2 ;;
@@ -241,6 +247,8 @@ if [[ $interactive == true ]]; then
     mqtt_cache_max_size=$(value_prompt 'MQTT cache maximum size' "$mqtt_cache_max_size")
   fi
   reuse_stale_data=$(bool_prompt 'Reuse previous sensor data when missing?' "$reuse_stale_data")
+  sensor_retry_attempts=$(value_prompt 'BLE acquisition attempts per polling cycle' "$sensor_retry_attempts")
+  sensor_stale_cycles=$(value_prompt 'Missing polling cycles before reused data becomes stale' "$sensor_stale_cycles")
   poll_interval=$(value_prompt 'Polling interval seconds' "$poll_interval")
   scan_duration=$(value_prompt 'BLE scan duration seconds' "$scan_duration")
   bluetooth_adapter=$(value_prompt 'Linux Bluetooth adapter (blank = OS default)' "$bluetooth_adapter")
@@ -318,6 +326,14 @@ fi
 [[ -z $cloud_config_source || $install_cloud == true ]] || { echo 'cloud config supplied but cloud component is not installed' >&2; exit 2; }
 [[ $snmp != true || -n $snmp_community_source ]] || {
   echo 'SNMP requires --snmp-community-file' >&2
+  exit 2
+}
+[[ $sensor_retry_attempts =~ ^[0-9]+$ ]] && (( sensor_retry_attempts >= 1 && sensor_retry_attempts <= 100 )) || {
+  echo '--sensor-retry-attempts must be an integer between 1 and 100' >&2
+  exit 2
+}
+[[ $sensor_stale_cycles =~ ^[0-9]+$ ]] && (( sensor_stale_cycles >= 1 && sensor_stale_cycles <= 1000 )) || {
+  echo '--sensor-stale-cycles must be an integer between 1 and 1000' >&2
   exit 2
 }
 [[ $history_retention_days =~ ^[0-9]+$ ]] && (( history_retention_days >= 1 && history_retention_days <= 36500 )) || {
@@ -401,6 +417,8 @@ args=(
   --mqtt-topic-prefix "$mqtt_topic_prefix"
   --poll-interval "$poll_interval"
   --scan-duration "$scan_duration"
+  --sensor-retry-attempts "$sensor_retry_attempts"
+  --sensor-stale-cycles "$sensor_stale_cycles"
   --history-retention-days "$history_retention_days"
   --state-file /var/lib/ble-sensors-mqtt/state.json
 )

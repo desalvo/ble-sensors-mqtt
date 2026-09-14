@@ -115,6 +115,8 @@ def cli_defaults(config: dict[str, Any]) -> dict[str, Any]:
         (bluetooth, "poll_interval", "poll_interval"),
         (bluetooth, "plugin_timeout", "plugin_timeout"),
         (runtime, "reuse_stale_data", "reuse_stale_data"),
+        (runtime, "sensor_retry_attempts", "sensor_retry_attempts"),
+        (runtime, "sensor_stale_cycles", "sensor_stale_cycles"),
         (runtime, "state_file", "state_file"),
         (runtime, "log_level", "log_level"),
         (mqtt, "host", "mqtt_host"),
@@ -256,6 +258,8 @@ def default_config() -> dict[str, Any]:
         },
         "runtime": {
             "reuse_stale_data": False,
+            "sensor_retry_attempts": 10,
+            "sensor_stale_cycles": 10,
             "state_file": "",
             "log_level": "INFO",
         },
@@ -331,6 +335,8 @@ def config_from_namespace(args: Any) -> dict[str, Any]:
         },
         "runtime": {
             "reuse_stale_data": args.reuse_stale_data,
+            "sensor_retry_attempts": args.sensor_retry_attempts,
+            "sensor_stale_cycles": args.sensor_stale_cycles,
             "state_file": text_path(args.state_file),
             "log_level": args.log_level,
         },

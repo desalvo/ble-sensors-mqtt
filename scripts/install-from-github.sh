@@ -38,7 +38,8 @@ by asking which optional components to install: BLE sensor decoder packs, cloud
 providers and the authenticated web frontend. CLI values remain the wizard
 defaults. Pass --non-interactive together with --with/--without-sensors,
 --with/--without-cloud and --with/--without-web for unattended provisioning.
-History options are forwarded too: --history-retention-days DAYS and
+Sensor retry/stale options are forwarded too: --sensor-retry-attempts N and
+--sensor-stale-cycles N. History options are forwarded too: --history-retention-days DAYS and
 --history-path FILE.
 
 Examples:

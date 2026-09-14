@@ -208,10 +208,12 @@ def run_gui() -> int:
     add_entry(general, 0, "bluetooth.poll_interval", "Polling interval (s)", section("bluetooth").get("poll_interval", 30))
     add_entry(general, 1, "bluetooth.scan_duration", "BLE scan duration (s)", section("bluetooth").get("scan_duration", 8))
     add_entry(general, 2, "bluetooth.plugin_timeout", "Plugin timeout (s)", section("bluetooth").get("plugin_timeout", 15))
-    add_bool(general, 3, "runtime.reuse_stale_data", "Reuse previous data and mark it stale when a sensor is missing", section("runtime").get("reuse_stale_data", False))
-    add_entry(general, 4, "runtime.log_level", "Log level", section("runtime").get("log_level", "INFO"))
-    add_entry(general, 5, "runtime.state_file", "Runtime state file (optional)", section("runtime").get("state_file", ""))
-    ttk.Label(general, text=f"Configuration file: {path}", wraplength=700).grid(row=6, column=0, columnspan=2, sticky="w", padx=8, pady=12)
+    add_bool(general, 3, "runtime.reuse_stale_data", "Reuse previous data while a sensor is temporarily missing", section("runtime").get("reuse_stale_data", False))
+    add_entry(general, 4, "runtime.sensor_retry_attempts", "BLE acquisition attempts per polling cycle", section("runtime").get("sensor_retry_attempts", 10))
+    add_entry(general, 5, "runtime.sensor_stale_cycles", "Missing cycles before a reused reading becomes stale", section("runtime").get("sensor_stale_cycles", 10))
+    add_entry(general, 6, "runtime.log_level", "Log level", section("runtime").get("log_level", "INFO"))
+    add_entry(general, 7, "runtime.state_file", "Runtime state file (optional)", section("runtime").get("state_file", ""))
+    ttk.Label(general, text=f"Configuration file: {path}", wraplength=700).grid(row=8, column=0, columnspan=2, sticky="w", padx=8, pady=12)
 
     mqtt = ttk.Frame(notebook)
     mqtt.columnconfigure(1, weight=1)
@@ -322,7 +324,7 @@ def run_gui() -> int:
                 "mqtt.connect_timeout",
             }:
                 raw = parse_number(str(raw), float)
-            elif dotted in {"mqtt.port", "mqtt.qos", "mqtt.stale_cycles", "prometheus.port", "snmp.port", "frontend.port"}:
+            elif dotted in {"mqtt.port", "mqtt.qos", "mqtt.stale_cycles", "runtime.sensor_retry_attempts", "runtime.sensor_stale_cycles", "prometheus.port", "snmp.port", "frontend.port"}:
                 raw = parse_number(str(raw), int)
             elif dotted == "mqtt_cache.max_size":
                 text = str(raw).strip()

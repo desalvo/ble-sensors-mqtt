@@ -1,4 +1,6 @@
 # Changelog
+
+- Sensor acquisition now retries known BLE devices up to 10 windows within each polling cycle and delays `stale=true` until 10 consecutive missing cycles; both thresholds are configurable via CLI/configuration and installer wizard.
 - Added optional authenticated responsive web frontend with sensor dashboard, admin/reader RBAC, local/LDAP/OIDC authentication, portable TOTP MFA, persistent runtime configuration and encrypted full backup/restore.
 - Added unified `config.toml` configuration (CLI > file > defaults), graphical Windows/macOS settings applications, a Windows Service installer, and macOS launchd LaunchAgent management. Tagged CI now builds standard Windows `.exe` and macOS `.pkg` installers in addition to portable bundles.
 - Added host Bluetooth preflight, explicit `/run/dbus` mounting for Docker/Kubernetes, a Kubernetes BLE test pod, and a GitHub-clone bootstrap installer covering prerequisites, venv, and systemd.

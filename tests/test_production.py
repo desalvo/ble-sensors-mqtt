@@ -230,8 +230,14 @@ def test_stale_reuse_cli_and_payload_behavior():
             "data": {"temperature": 22.5},
         }
     }
-    reused = apply_stale_fallback({}, previous, True)
+    counters: dict[str, int] = {}
+    for missed_cycle in range(1, 10):
+        reused = apply_stale_fallback({}, previous, True, counters, 10)
+        assert reused["AA:BB:CC:DD:EE:FF"]["stale"] is False
+        assert counters["AA:BB:CC:DD:EE:FF"] == missed_cycle
+    reused = apply_stale_fallback({}, previous, True, counters, 10)
     assert reused["AA:BB:CC:DD:EE:FF"]["stale"] is True
+    assert counters["AA:BB:CC:DD:EE:FF"] == 10
     assert reused["AA:BB:CC:DD:EE:FF"]["data"]["temperature"] == 22.5
     assert reused["AA:BB:CC:DD:EE:FF"]["observed_at"] == "2026-09-13T00:00:00+00:00"
 
@@ -244,13 +250,22 @@ def test_stale_reuse_cli_and_payload_behavior():
         },
         previous,
         True,
+        counters,
+        10,
     )
     assert fresh["AA:BB:CC:DD:EE:FF"]["stale"] is False
     assert fresh["AA:BB:CC:DD:EE:FF"]["data"]["temperature"] == 23.0
+    assert "AA:BB:CC:DD:EE:FF" not in counters
 
     disabled = apply_stale_fallback({}, previous, False)
     assert disabled == {}
 
+
+
+def test_sensor_retry_and_stale_defaults():
+    args = parser().parse_args(["--mqtt-host", "127.0.0.1"])
+    assert args.sensor_retry_attempts == 10
+    assert args.sensor_stale_cycles == 10
 
 def test_mqtt_cache_is_bounded_fifo_and_private(tmp_path):
     from ble_sensors_mqtt.mqtt_cache import MQTTCache

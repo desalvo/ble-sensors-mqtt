@@ -10,6 +10,8 @@ sensor_names = []
 
 [runtime]
 reuse_stale_data = false
+sensor_retry_attempts = 10
+sensor_stale_cycles = 10
 state_file = ""
 log_level = "INFO"
 

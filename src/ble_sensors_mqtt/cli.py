@@ -253,7 +253,15 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument(
         "--reuse-stale-data", action="store_true",
-        help="reuse the previous reading with stale=true when a sensor is missing or has no data",
+        help="reuse the previous reading while a sensor is missing; mark it stale only after --sensor-stale-cycles consecutive misses",
+    )
+    result.add_argument(
+        "--sensor-retry-attempts", type=int, default=10, metavar="N",
+        help="retry missing known BLE sensors up to N acquisition windows inside one polling cycle (default: 10)",
+    )
+    result.add_argument(
+        "--sensor-stale-cycles", type=int, default=10, metavar="N",
+        help="mark a reused sensor reading stale only after N consecutive missing polling cycles (default: 10)",
     )
     result.add_argument("--retain", action=argparse.BooleanOptionalAction, default=True)
     result.add_argument("--stale-cycles", type=int, default=3, metavar="N", help="clear retained sensor state after N consecutive missing cycles")
@@ -442,6 +450,48 @@ async def discover_with_plugins(
     return devices
 
 
+async def discover_cycle_with_retries(
+    args: argparse.Namespace,
+    enabled: set[str] | None,
+    cloud_config: dict[str, Any] | None,
+    expected_ble: set[str],
+) -> dict[str, dict[str, Any]]:
+    """Retry missing known BLE sensors within the normal scan-duration budget."""
+    attempts = max(1, int(args.sensor_retry_attempts))
+    if not expected_ble or attempts == 1:
+        return await discover_with_plugins(
+            args.scan_duration, enabled, cloud_config, args.plugin_timeout,
+            args.bluetooth_adapter,
+        )
+
+    # Split the configured BLE scan budget across retry windows. Cloud providers are
+    # polled only on the first window so retries cannot multiply external API calls.
+    window = max(0.2, float(args.scan_duration) / attempts)
+    collected: dict[str, dict[str, Any]] = {}
+    for attempt in range(1, attempts + 1):
+        found = await discover_with_plugins(
+            window,
+            enabled,
+            cloud_config if attempt == 1 else None,
+            args.plugin_timeout,
+            args.bluetooth_adapter,
+        )
+        collected.update(found)
+        missing = expected_ble - set(collected)
+        if not missing:
+            if attempt > 1:
+                LOG.debug("all known BLE sensors recovered after %d acquisition attempts", attempt)
+            break
+        if attempt < attempts:
+            LOG.debug(
+                "BLE acquisition attempt %d/%d still missing %d known sensor(s)",
+                attempt,
+                attempts,
+                len(missing),
+            )
+    return collected
+
+
 def topic_part(address: str) -> str:
     if MAC_PATTERN.fullmatch(address):
         return "".join(c for c in address.lower() if c in "0123456789abcdef")
@@ -475,25 +525,50 @@ def apply_stale_fallback(
     current: dict[str, dict[str, Any]],
     previous: dict[str, dict[str, Any]],
     enabled: bool,
+    missing_sensor_cycles: dict[str, int] | None = None,
+    stale_after_cycles: int = 10,
 ) -> dict[str, dict[str, Any]]:
+    """Reuse the last good value and delay stale until a miss threshold is reached.
+
+    ``missing_sensor_cycles`` is intentionally separate from MQTT retained-topic cleanup state:
+    it tracks sensor acquisition health only. A fresh reading immediately resets its counter.
+    """
+    counters = missing_sensor_cycles if missing_sensor_cycles is not None else {}
     if not enabled:
+        for address, payload in current.items():
+            if has_sensor_data(payload):
+                counters.pop(address, None)
         return {address: dict(payload) for address, payload in current.items()}
-    fresh: dict[str, dict[str, Any]] = {}
-    for address, payload in current.items():
-        if not has_sensor_data(payload) and address in previous:
-            stale = dict(previous[address])
-            stale["stale"] = True
-            fresh[address] = stale
-        else:
+
+    threshold = max(1, stale_after_cycles)
+    exported: dict[str, dict[str, Any]] = {}
+    all_addresses = set(current) | set(previous)
+    for address in all_addresses:
+        payload = current.get(address)
+        if payload is not None and has_sensor_data(payload):
             normalized = dict(payload)
             normalized["stale"] = False
-            fresh[address] = normalized
-    for address, payload in previous.items():
-        if address not in fresh:
-            stale = dict(payload)
-            stale["stale"] = True
-            fresh[address] = stale
-    return fresh
+            exported[address] = normalized
+            counters.pop(address, None)
+            continue
+
+        if address not in previous:
+            if payload is not None:
+                normalized = dict(payload)
+                normalized["stale"] = False
+                exported[address] = normalized
+            continue
+
+        misses = counters.get(address, 0) + 1
+        counters[address] = misses
+        retained = dict(previous[address])
+        retained["stale"] = misses >= threshold
+        exported[address] = retained
+
+    for address in list(counters):
+        if address not in all_addresses:
+            counters.pop(address, None)
+    return exported
 
 
 def load_runtime_state(path: Path | None, prefix: str) -> tuple[set[str], dict[str, int]]:
@@ -611,6 +686,10 @@ def validate_runtime_security(args: argparse.Namespace) -> None:
         raise ValueError("--history-retention-days must be between 1 and 36500")
     if args.stale_cycles < 1 or args.stale_cycles > 1000:
         raise ValueError("--stale-cycles must be between 1 and 1000")
+    if args.sensor_retry_attempts < 1 or args.sensor_retry_attempts > 100:
+        raise ValueError("--sensor-retry-attempts must be between 1 and 100")
+    if args.sensor_stale_cycles < 1 or args.sensor_stale_cycles > 1000:
+        raise ValueError("--sensor-stale-cycles must be between 1 and 1000")
     if not args.mqtt_tls and not args.allow_insecure_mqtt:
         if args.mqtt_username or not is_local_mqtt_host(args.mqtt_host):
             raise ValueError(
@@ -783,6 +862,7 @@ async def bridge(args: argparse.Namespace) -> int:
         previously_published, missing_cycles = set(), {}
 
     previous_exported: dict[str, dict[str, Any]] = {}
+    missing_sensor_cycles: dict[str, int] = {}
     try:
         while not stop.is_set():
             started = time.monotonic()
@@ -794,10 +874,14 @@ async def bridge(args: argparse.Namespace) -> int:
                 aliases = name_map(args.device_name + args.sensor_name)
                 enabled = set(args.plugin) or None
                 cloud_config = load_cloud_config(args.cloud_config)
+                expected_ble = {
+                    address
+                    for address, payload in previous_exported.items()
+                    if "cloud" not in str(payload.get("protocol", "")).lower()
+                }
                 devices = apply_device_names(
-                    await discover_with_plugins(
-                        args.scan_duration, enabled, cloud_config, args.plugin_timeout,
-                        args.bluetooth_adapter,
+                    await discover_cycle_with_retries(
+                        args, enabled, cloud_config, expected_ble
                     ),
                     aliases,
                 )
@@ -807,7 +891,11 @@ async def bridge(args: argparse.Namespace) -> int:
                     if not allowed or address in allowed
                 }
                 exported = apply_stale_fallback(
-                    current_exported, previous_exported, args.reuse_stale_data
+                    current_exported,
+                    previous_exported,
+                    args.reuse_stale_data,
+                    missing_sensor_cycles,
+                    args.sensor_stale_cycles,
                 )
                 previous_exported = {
                     address: dict(payload)

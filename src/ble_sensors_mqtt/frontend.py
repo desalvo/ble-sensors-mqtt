@@ -518,6 +518,7 @@ def start_frontend(
                 ("bluetooth", "adapter"): "bluetooth_adapter",
                 ("bluetooth", "scan_duration"): "scan_duration", ("bluetooth", "poll_interval"): "poll_interval",
                 ("bluetooth", "plugin_timeout"): "plugin_timeout", ("runtime", "reuse_stale_data"): "reuse_stale_data",
+                ("runtime", "sensor_retry_attempts"): "sensor_retry_attempts", ("runtime", "sensor_stale_cycles"): "sensor_stale_cycles",
                 ("runtime", "state_file"): "state_file", ("runtime", "log_level"): "log_level",
                 ("history", "retention_days"): "history_retention_days",
                 ("mqtt", "retain"): "retain", ("mqtt", "qos"): "qos", ("mqtt", "stale_cycles"): "stale_cycles",

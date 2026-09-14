@@ -1,4 +1,6 @@
 # Changelog
+
+- L’acquisizione sensori ora ritenta i dispositivi BLE noti fino a 10 finestre nello stesso ciclo di polling e imposta `stale=true` solo dopo 10 cicli consecutivi mancanti; entrambe le soglie sono configurabili da CLI/configurazione e wizard di installazione.
 - Aggiunto frontend web responsive autenticato opzionale con dashboard sensori, RBAC admin/reader, autenticazione locale/LDAP/OIDC, MFA TOTP portabile, configurazione runtime persistente e backup/restore completo cifrato.
 - Aggiunti configurazione unificata `config.toml` (CLI > file > default), applicazioni grafiche Settings per Windows/macOS, servizio Windows e gestione LaunchAgent launchd su macOS. La CI sui tag costruisce ora installer standard Windows `.exe` e macOS `.pkg` oltre ai bundle portabili.
 - Aggiunti preflight Bluetooth host, mount `/run/dbus` esplicito per Docker/Kubernetes, pod Kubernetes di test BLE e installer bootstrap da clone GitHub con prerequisiti, venv e systemd.
