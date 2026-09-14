@@ -38,12 +38,15 @@ by asking which optional components to install: BLE sensor decoder packs, cloud
 providers and the authenticated web frontend. CLI values remain the wizard
 defaults. Pass --non-interactive together with --with/--without-sensors,
 --with/--without-cloud and --with/--without-web for unattended provisioning.
+History options are forwarded too: --history-retention-days DAYS and
+--history-path FILE.
 
 Examples:
   sudo scripts/install-from-github.sh --mqtt-host mqtt.example.net --prometheus
   sudo scripts/install-from-github.sh --ref v1.0.0 --non-interactive \
     --with-sensors --without-cloud --with-web \
-    --mqtt-host mqtt.example.net --mqtt-tls --home-assistant-discovery
+    --mqtt-host mqtt.example.net --mqtt-tls --home-assistant-discovery \
+    --history-retention-days 30
 HELP
 }
 

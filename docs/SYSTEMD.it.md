@@ -163,3 +163,5 @@ Per cambiare configurazione modificare l'array JSON oppure rieseguire l'installe
 ## Fallback stale e cache MQTT
 
 L’installer chiede se abilitare il riuso stale e come configurare la cache MQTT persistente. I default sono cache attiva, `/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3`, 1 GiB e riuso stale disattivato. Gli stessi valori possono essere passati senza interazione con `--reuse-stale-data`, `--mqtt-cache-path`, `--mqtt-cache-max-size` o `--no-mqtt-cache`.
+
+Quando viene abilitato il frontend web autenticato, il wizard chiede anche la retention dello storico sensori (30 giorni per default) e il percorso opzionale del database SQLite. In modalità non interattiva usare `--history-retention-days DAYS` e `--history-path FILE`.

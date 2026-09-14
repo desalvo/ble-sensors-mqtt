@@ -87,3 +87,15 @@ def test_systemd_installer_exposes_component_selection():
     for option in ("--with-sensors", "--without-sensors", "--with-cloud", "--without-cloud", "--with-web", "--without-web"):
         assert option in script
     assert "Select optional software components to install:" in script
+
+
+def test_systemd_installer_exposes_history_configuration():
+    script = (ROOT / "scripts" / "install-systemd.sh").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "scripts" / "install-from-github.sh").read_text(encoding="utf-8")
+    assert "--history-retention-days" in script
+    assert "--history-path" in script
+    assert "Sensor history retention days" in script
+    assert 'args+=(--history-path "$history_path")' in script
+    assert '--history-retention-days "$history_retention_days"' in script
+    assert "--history-retention-days" in bootstrap
+    assert "--history-path" in bootstrap

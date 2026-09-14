@@ -51,6 +51,8 @@ Usage: sudo scripts/install-systemd.sh [options]
   --allow-external-frontend
   --frontend-tls-cert FILE
   --frontend-tls-key FILE
+  --history-retention-days DAYS    default 30
+  --history-path FILE              default frontend data dir/history.sqlite3
   --cloud-config FILE
   --extra-arg ARG                  repeatable raw application argument
   --enable | --no-enable           default enable
@@ -132,6 +134,8 @@ frontend_data_dir='/var/lib/ble-sensors-mqtt/frontend'
 allow_external_frontend=false
 frontend_tls_cert=''
 frontend_tls_key=''
+history_retention_days=30
+history_path=''
 cloud_config_source=''
 enable_service=true
 start_service=true
@@ -189,6 +193,8 @@ while (($#)); do
     --allow-external-frontend) allow_external_frontend=true; shift ;;
     --frontend-tls-cert) frontend_tls_cert=${2:?}; shift 2 ;;
     --frontend-tls-key) frontend_tls_key=${2:?}; shift 2 ;;
+    --history-retention-days) history_retention_days=${2:?}; shift 2 ;;
+    --history-path) history_path=${2:?}; shift 2 ;;
     --cloud-config) cloud_config_source=${2:?}; shift 2 ;;
     --extra-arg) extra_args+=("${2:?}"); shift 2 ;;
     --enable) enable_service=true; shift ;;
@@ -294,6 +300,8 @@ if [[ $interactive == true ]]; then
     if [[ -n $frontend_tls_cert ]]; then
       frontend_tls_key=$(value_prompt 'Frontend TLS private key PEM' "$frontend_tls_key")
     fi
+    history_retention_days=$(value_prompt 'Sensor history retention days' "$history_retention_days")
+    history_path=$(value_prompt 'Sensor history SQLite path (blank = frontend data dir/history.sqlite3)' "$history_path")
   fi
 
   append_prompt 'Additional raw ble-sensors-mqtt argument' extra_args
@@ -310,6 +318,10 @@ fi
 [[ -z $cloud_config_source || $install_cloud == true ]] || { echo 'cloud config supplied but cloud component is not installed' >&2; exit 2; }
 [[ $snmp != true || -n $snmp_community_source ]] || {
   echo 'SNMP requires --snmp-community-file' >&2
+  exit 2
+}
+[[ $history_retention_days =~ ^[0-9]+$ ]] && (( history_retention_days >= 1 && history_retention_days <= 36500 )) || {
+  echo '--history-retention-days must be an integer between 1 and 36500' >&2
   exit 2
 }
 
@@ -389,6 +401,7 @@ args=(
   --mqtt-topic-prefix "$mqtt_topic_prefix"
   --poll-interval "$poll_interval"
   --scan-duration "$scan_duration"
+  --history-retention-days "$history_retention_days"
   --state-file /var/lib/ble-sensors-mqtt/state.json
 )
 if [[ $mqtt_cache == true ]]; then
@@ -424,6 +437,7 @@ if [[ $frontend == true ]]; then
     args+=(--frontend-tls-cert "$frontend_tls_cert" --frontend-tls-key "$frontend_tls_key")
   fi
 fi
+[[ -z $history_path ]] || args+=(--history-path "$history_path")
 [[ -z $cloud_config_dest ]] || args+=(--cloud-config "$cloud_config_dest")
 [[ -z $bluetooth_adapter ]] || args+=(--bluetooth-adapter "$bluetooth_adapter")
 for value in "${device_args[@]}"; do args+=(--device "$value"); done
