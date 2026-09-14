@@ -424,12 +424,29 @@ def start_frontend(
             flash(str(exc), "error")
             start = end = None
         deduplicate = request.args.get("duplicates") != "1"
+        retention_days = int(getattr(args, "history_retention_days", 30))
+        presets = [
+            {"key": "30m", "label": "30m", "minutes": 30},
+            {"key": "1h", "label": "1h", "minutes": 60},
+            {"key": "3h", "label": "3h", "minutes": 180},
+            {"key": "6h", "label": "6h", "minutes": 360},
+            {"key": "12h", "label": "12h", "minutes": 720},
+            {"key": "24h", "label": "24h", "minutes": 1440},
+            {"key": "1w", "label": "1 week", "minutes": 7 * 1440},
+            {"key": "2w", "label": "2 weeks", "minutes": 14 * 1440},
+            {"key": "1mo", "label": "1 month", "minutes": 30 * 1440},
+            {"key": "3mo", "label": "3 months", "minutes": 90 * 1440},
+            {"key": "6mo", "label": "6 months", "minutes": 180 * 1440},
+            {"key": "1y", "label": "1 year", "minutes": 365 * 1440},
+        ]
+        quick_ranges = [item for item in presets if item["minutes"] <= retention_days * 1440]
         rows = history.query(selected, start, end, deduplicate=deduplicate) if history is not None else []
         return render_template(
             "history.html",
             available=available, selected=selected, rows=rows,
             start=request.args.get("start", ""), end=request.args.get("end", ""),
-            deduplicate=deduplicate, retention_days=getattr(args, "history_retention_days", 30),
+            deduplicate=deduplicate, retention_days=retention_days,
+            quick_ranges=quick_ranges, quick_range=request.args.get("range", ""),
         )
 
     @app.route("/api/history")

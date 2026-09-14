@@ -1,68 +1,279 @@
 {% extends 'base.html' %}
 {% block title %}History · ble-sensors-mqtt{% endblock %}
+{% block page_eyebrow %}SENSOR HISTORY{% endblock %}
+{% block page_heading %}Historical readings{% endblock %}
+{% block page_subtitle %}Compare one or more sensors in charts or detailed samples, using quick ranges and retained historical values up to {{ retention_days }} days by default.{% endblock %}
 {% block content %}
-<section class="history-hero panel">
-  <div><span class="eyebrow dark">SENSOR HISTORY</span><h1>Historical readings</h1><p>Compare one or more sensors as charts or detailed samples. Default retention: <b>{{ retention_days }} days</b>.</p></div>
-</section>
-
 <section class="panel history-controls">
   <form method="get" action="{{ url_for('history_view') }}" id="history-filter-form">
-    <div class="history-filter-grid">
-      <label class="history-sensors"><span>Sensors</span><select name="sensor" multiple size="6">
-        {% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }} ({{ sensor.samples }})</option>{% endfor %}
-      </select><small>Ctrl/Cmd-click to select multiple sensors.</small></label>
-      <label><span>From</span><input type="date" name="start" value="{{ start }}"></label>
-      <label><span>To</span><input type="date" name="end" value="{{ end }}"></label>
+    <div class="history-filter-grid history-period-grid">
+      <label><span>From</span><input type="datetime-local" name="start" value="{{ start }}"></label>
+      <label><span>To</span><input type="datetime-local" name="end" value="{{ end }}"></label>
       <label class="toggle-line"><input type="checkbox" name="duplicates" value="1" {% if not deduplicate %}checked{% endif %}><span>Show consecutive duplicates</span></label>
     </div>
-    <div class="form-actions"><button type="submit">Apply</button><a class="button ghost-link" href="{{ url_for('history_view') }}">Reset</a></div>
+    <input type="hidden" name="range" id="history-quick-range" value="{{ quick_range }}">
+    <div class="history-quick-ranges" aria-label="Quick history ranges">
+      <span>Quick range</span>
+      {% for preset in quick_ranges %}
+      <button type="button" class="history-quick-range{% if quick_range == preset.key %} active{% endif %}" data-history-range="{{ preset.key }}" data-minutes="{{ preset.minutes }}">{{ preset.label }}</button>
+      {% endfor %}
+    </div>
+
+    <details class="panel history-collapsible history-section" data-history-section="sensors">
+      <summary><span><span class="eyebrow dark">SENSORS</span><strong>Sensors</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="history-section-body">
+        <label class="history-sensors"><span>Select sensors</span><select name="sensor" multiple size="6">
+          {% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }} ({{ sensor.samples }})</option>{% endfor %}
+        </select><small>Ctrl/Cmd-click to select multiple sensors.</small></label>
+      </div>
+    </details>
+
+    <div class="form-actions"><button type="submit">Apply</button><a class="button ghost-link" id="history-reset" href="{{ url_for('history_view') }}">Reset</a></div>
   </form>
 </section>
 
-<section class="panel">
-  <div class="section-heading"><div><span class="eyebrow dark">GRAPH</span><h2>Selected sensor values</h2></div></div>
-  <div class="chart-toolbar"><label>Series <select id="series-selector" multiple size="4"></select></label><small>Select multiple series to compare sensors.</small></div>
-  <div class="history-chart-wrap"><canvas id="history-chart" width="1200" height="430"></canvas></div>
-  <div id="chart-empty" class="empty-state" hidden>No numeric or boolean series are available in the selected interval.</div>
-</section>
+<details class="panel history-collapsible history-section" data-history-section="series">
+  <summary><span><span class="eyebrow dark">SERIES</span><strong>Series</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="history-section-body">
+    <div class="chart-toolbar"><label>Selected sensor values <select id="series-selector" multiple size="6"></select></label><small>Select multiple series to compare sensors in the graph and values in the table.</small></div>
+  </div>
+</details>
 
-<section class="panel">
-  <div class="section-heading"><div><span class="eyebrow dark">TABLE</span><h2>Historical samples</h2><p>{% if deduplicate %}Consecutive samples with identical values and identical stale flag are omitted.{% else %}All samples are displayed.{% endif %}</p></div><strong>{{ rows|length }} rows</strong></div>
-  <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Recorded</th><th>Sensor</th><th>Stale</th><th>Values</th></tr></thead><tbody>
-  {% for row in rows %}<tr><td>{{ row.recorded_at }}</td><td><strong>{{ row.name }}</strong><small>{{ row.sensor_id }}</small></td><td><span class="status-chip {{ 'degraded' if row.stale else 'online' }}">{{ 'Stale' if row.stale else 'Live' }}</span></td><td><div class="history-values">{% for value in row['values'] %}<span><b>{{ value.path }}</b> {{ value.value }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No historical samples in the selected interval.</td></tr>{% endfor %}
-  </tbody></table></div>
-</section>
+<details class="panel history-collapsible history-section" data-history-section="graph" open>
+  <summary><span><span class="eyebrow dark">GRAPH</span><strong>Selected sensor values</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="history-section-body">
+    <div class="history-chart-wrap"><canvas id="history-chart" width="1200" height="430"></canvas><div id="history-chart-tooltip" class="history-chart-tooltip" hidden></div></div>
+    <div id="chart-empty" class="empty-state" hidden>No numeric or boolean series are available in the selected interval.</div>
+  </div>
+</details>
+
+<details class="panel history-collapsible history-section" data-history-section="table">
+  <summary><span><span class="eyebrow dark">TABLE</span><strong>Historical samples</strong></span><span class="history-section-meta">{{ rows|length }} rows</span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="history-section-body">
+    <p>{% if deduplicate %}Consecutive samples with identical values and identical stale flag are omitted.{% else %}All samples are displayed.{% endif %}</p>
+    <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Recorded</th><th>Sensor</th><th>Stale</th><th>Values</th></tr></thead><tbody>
+    {% for row in rows %}<tr><td>{{ row.recorded_at }}</td><td><strong>{{ row.name }}</strong><small>{{ row.sensor_id }}</small></td><td><span class="status-chip {{ 'degraded' if row.stale else 'online' }}">{{ 'Stale' if row.stale else 'Live' }}</span></td><td><div class="history-values">{% for value in row['values'] %}<span><b>{{ value.path[5:] if value.path.startswith('data.') else value.path }}</b> {{ value.value }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No historical samples in the selected interval.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</details>
 
 {% if current_user.role == 'admin' %}
-<section class="panel danger-panel">
-  <span class="eyebrow dark">ADMINISTRATION</span><h2>Delete history</h2><p>Delete the full history of selected sensors, or only the chosen interval. This action cannot be undone.</p>
-  <form method="post" action="{{ url_for('history_delete') }}" onsubmit="return confirm('Delete the selected historical samples? This cannot be undone.');">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="history-delete-grid"><label><span>Sensors</span><select name="sensor" multiple size="5" required>{% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }}</option>{% endfor %}</select></label><label><span>From (optional)</span><input type="date" name="start" value="{{ start }}"></label><label><span>To (optional)</span><input type="date" name="end" value="{{ end }}"></label></div>
-    <button class="danger" type="submit">Delete selected history</button>
-  </form>
-</section>
+<details class="panel danger-panel history-collapsible history-section" data-history-section="administration">
+  <summary><span><span class="eyebrow dark">ADMINISTRATION</span><strong>Delete history</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="history-section-body">
+    <p>Delete the full history of selected sensors, or only the chosen interval. This action cannot be undone.</p>
+    <form method="post" action="{{ url_for('history_delete') }}" onsubmit="return confirm('Delete the selected historical samples? This cannot be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="history-delete-grid"><label><span>Sensors</span><select name="sensor" multiple size="5" required>{% for sensor in available %}<option value="{{ sensor.sensor_id }}" {% if sensor.sensor_id in selected %}selected{% endif %}>{{ sensor.name }} · {{ sensor.sensor_id }}</option>{% endfor %}</select></label><label><span>From (optional)</span><input type="date" name="start" value="{{ start }}"></label><label><span>To (optional)</span><input type="date" name="end" value="{{ end }}"></label></div>
+      <button class="danger" type="submit">Delete selected history</button>
+    </form>
+  </div>
+</details>
 {% endif %}
 
 <script>
+const HISTORY_PREFS_COOKIE = 'ble_sensors_mqtt_history_prefs';
+const HISTORY_PREFS_MAX_AGE = 31536000;
+const filterForm = document.querySelector('#history-filter-form');
+const resetLink = document.querySelector('#history-reset');
+const historySections = [...document.querySelectorAll('[data-history-section]')];
+
+function readHistoryPrefs() {
+  const prefix = `${HISTORY_PREFS_COOKIE}=`;
+  const entry = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(prefix));
+  if (!entry) return null;
+  try { return JSON.parse(decodeURIComponent(entry.slice(prefix.length))); } catch (_) { return null; }
+}
+function writeHistoryPrefs(prefs) {
+  document.cookie = `${HISTORY_PREFS_COOKIE}=${encodeURIComponent(JSON.stringify(prefs))}; Max-Age=${HISTORY_PREFS_MAX_AGE}; Path=/; SameSite=Lax`;
+}
+function clearHistoryPrefs() {
+  document.cookie = `${HISTORY_PREFS_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax`;
+}
+function sectionPrefsFromPage() {
+  const sections = {};
+  historySections.forEach(section => { sections[section.dataset.historySection] = !!section.open; });
+  return sections;
+}
+function applySectionPrefs(prefs) {
+  const savedSections = prefs && prefs.sections ? prefs.sections : {};
+  const defaults = {sensors:false, series:false, graph:true, table:false, administration:false};
+  historySections.forEach(section => {
+    const key = section.dataset.historySection;
+    section.open = Object.prototype.hasOwnProperty.call(savedSections, key) ? !!savedSections[key] : !!defaults[key];
+  });
+}
+function filterPrefsFromForm() {
+  if (!filterForm) return {};
+  const sensorSelect = filterForm.querySelector('select[name="sensor"]');
+  return {
+    sensors: [...sensorSelect.selectedOptions].map(option => option.value),
+    start: filterForm.querySelector('input[name="start"]')?.value || '',
+    end: filterForm.querySelector('input[name="end"]')?.value || '',
+    duplicates: !!filterForm.querySelector('input[name="duplicates"]')?.checked,
+    quickRange: filterForm.querySelector('input[name="range"]')?.value || '',
+  };
+}
+function explicitHistoryQueryPresent() {
+  const params = new URLSearchParams(window.location.search);
+  return params.has('sensor') || params.has('start') || params.has('end') || params.has('duplicates') || params.has('range');
+}
+function queryFromHistoryPrefs(prefs) {
+  const params = new URLSearchParams();
+  (prefs.sensors || []).forEach(sensor => params.append('sensor', sensor));
+  if (prefs.start) params.set('start', prefs.start);
+  if (prefs.end) params.set('end', prefs.end);
+  if (prefs.duplicates) params.set('duplicates', '1');
+  if (prefs.quickRange) params.set('range', prefs.quickRange);
+  return params.toString();
+}
+
+
+const quickRangeInput = document.querySelector('#history-quick-range');
+const quickRangeButtons = [...document.querySelectorAll('[data-history-range]')];
+function formatLocalDateTime(date) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function selectQuickRange(button) {
+  const minutes = Number(button.dataset.minutes || 0);
+  if (!Number.isFinite(minutes) || minutes <= 0 || !filterForm) return;
+  const now = new Date();
+  const start = new Date(now.getTime() - minutes * 60000);
+  filterForm.querySelector('input[name="start"]').value = formatLocalDateTime(start);
+  filterForm.querySelector('input[name="end"]').value = formatLocalDateTime(now);
+  quickRangeInput.value = button.dataset.historyRange || '';
+  quickRangeButtons.forEach(item => item.classList.toggle('active', item === button));
+  writeHistoryPrefs(currentHistoryPrefs());
+  filterForm.requestSubmit();
+}
+quickRangeButtons.forEach(button => button.addEventListener('click', () => selectQuickRange(button)));
+
+const savedHistoryPrefs = readHistoryPrefs();
+applySectionPrefs(savedHistoryPrefs);
+if (!explicitHistoryQueryPresent() && savedHistoryPrefs) {
+  const query = queryFromHistoryPrefs(savedHistoryPrefs);
+  if (query) {
+    window.location.replace(`${window.location.pathname}?${query}`);
+  }
+}
+
 const historyRows = {{ rows|tojson }};
 const canvas = document.querySelector('#history-chart');
 const selector = document.querySelector('#series-selector');
 const empty = document.querySelector('#chart-empty');
+const tooltip = document.querySelector('#history-chart-tooltip');
+let renderedPoints = [];
 const palette = ['#4dd4ac','#63a8ff','#ffb55c','#d58cff','#ff7088','#7ed957','#ffd166','#7bdff2'];
 function numeric(v) { if (typeof v === 'boolean') return v ? 1 : 0; if (typeof v === 'number' && Number.isFinite(v)) return v; return null; }
 const series = new Map();
-historyRows.forEach(row => (row.values || []).forEach(item => { const value=numeric(item.value); if(value===null)return; const key=`${row.sensor_id} · ${item.path}`; if(!series.has(key))series.set(key,[]); series.get(key).push({t:new Date(row.recorded_at).getTime(),v:value,stale:row.stale,name:row.name}); }));
-[...series.keys()].sort().forEach((key,index) => { const option=document.createElement('option'); option.value=key; option.textContent=key; option.selected=index<Math.min(4,series.size); selector.appendChild(option); });
+function sensorLabel(row) {
+  const name = String(row.name || '').trim();
+  const sensorId = String(row.sensor_id || '').trim();
+  return name && name !== sensorId ? name : sensorId;
+}
+function valueLabel(path) {
+  const text = String(path || '');
+  return text.startsWith('data.') ? text.slice(5) : text;
+}
+historyRows.forEach(row => (row.values || []).forEach(item => { const value=numeric(item.value); if(value===null)return; const key=`${sensorLabel(row)} · ${valueLabel(item.path)}`; if(!series.has(key))series.set(key,[]); series.get(key).push({t:new Date(row.recorded_at).getTime(),v:value,stale:row.stale,name:row.name}); }));
+const preferredSeries = new Set((savedHistoryPrefs && savedHistoryPrefs.series) || []);
+[...series.keys()].sort().forEach((key,index) => {
+  const option=document.createElement('option');
+  option.value=key;
+  option.textContent=key;
+  option.selected=preferredSeries.size ? preferredSeries.has(key) : index<Math.min(4,series.size);
+  selector.appendChild(option);
+});
+if (selector.options.length && selector.selectedOptions.length === 0) {
+  [...selector.options].slice(0, Math.min(4, selector.options.length)).forEach(option => { option.selected = true; });
+}
+function currentHistoryPrefs() {
+  return {
+    ...filterPrefsFromForm(),
+    series: [...selector.selectedOptions].map(option => option.value),
+    sections: sectionPrefsFromPage(),
+  };
+}
 function draw() {
   const keys=[...selector.selectedOptions].map(o=>o.value); const groups=keys.map(key=>({key,points:series.get(key)||[]})).filter(x=>x.points.length); const ctx=canvas.getContext('2d'); const ratio=window.devicePixelRatio||1; const cssWidth=canvas.clientWidth||1200; const cssHeight=430; canvas.width=cssWidth*ratio; canvas.height=cssHeight*ratio; ctx.scale(ratio,ratio); ctx.clearRect(0,0,cssWidth,cssHeight);
+  renderedPoints = []; tooltip.hidden = true;
   if(!groups.length){empty.hidden=false;return;} empty.hidden=true; const all=groups.flatMap(g=>g.points);
   const pad={l:62,r:22,t:28,b:68}; const w=cssWidth-pad.l-pad.r,h=cssHeight-pad.t-pad.b; let minT=Math.min(...all.map(p=>p.t)),maxT=Math.max(...all.map(p=>p.t)); let minV=Math.min(...all.map(p=>p.v)),maxV=Math.max(...all.map(p=>p.v)); if(minT===maxT){minT-=1000;maxT+=1000;} if(minV===maxV){minV-=1;maxV+=1;}
   ctx.strokeStyle='rgba(150,170,190,.25)'; ctx.fillStyle='#8190a5'; ctx.font='12px system-ui'; for(let i=0;i<=5;i++){const y=pad.t+h*i/5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();const value=maxV-(maxV-minV)*i/5;ctx.fillText(value.toFixed(2).replace(/\.00$/,''),8,y+4);}
-  groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.strokeStyle=color;ctx.lineWidth=2.3;ctx.beginPath();group.points.forEach((p,i)=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();group.points.forEach(p=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;ctx.fillStyle=p.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();});});
+  groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.strokeStyle=color;ctx.lineWidth=2.3;ctx.beginPath();group.points.forEach((p,i)=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();group.points.forEach(p=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;ctx.fillStyle=p.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();renderedPoints.push({x,y,key:group.key,value:p.v,time:p.t,stale:!!p.stale,color});});});
   ctx.fillStyle='#8190a5';ctx.fillText(new Date(minT).toLocaleString(),pad.l,pad.t+h+30);const endText=new Date(maxT).toLocaleString();ctx.fillText(endText,pad.l+w-ctx.measureText(endText).width,pad.t+h+30);
   let lx=pad.l,ly=cssHeight-16;groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.fillStyle=color;ctx.fillRect(lx,ly-8,12,3);ctx.fillStyle='#526174';const label=group.key.length>34?group.key.slice(0,31)+'…':group.key;ctx.fillText(label,lx+17,ly);lx+=ctx.measureText(label).width+46;if(lx>cssWidth-260){lx=pad.l;ly-=18;}});
 }
-selector.addEventListener('change',draw); window.addEventListener('resize',draw); if(selector.options.length)draw();else empty.hidden=false;
+
+function hideTooltip() { tooltip.hidden = true; }
+function showTooltip(event) {
+  if (!renderedPoints.length) { hideTooltip(); return; }
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  let nearest = null;
+  let nearestDistance = Infinity;
+  renderedPoints.forEach(point => {
+    const dx = point.x - x;
+    const dy = point.y - y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < nearestDistance) { nearest = point; nearestDistance = distance; }
+  });
+  if (!nearest || nearestDistance > 16) { hideTooltip(); return; }
+  const sameTime = renderedPoints.filter(point => Math.abs(point.time - nearest.time) <= 1);
+  const rows = sameTime.map(point => `<div class="history-tooltip-row"><span class="history-tooltip-dot" style="background:${point.stale ? '#ff9f43' : point.color}"></span><strong>${escapeHtml(point.key)}</strong><span>${escapeHtml(String(point.value))}${point.stale ? ' · stale' : ''}</span></div>`).join('');
+  tooltip.innerHTML = `<div class="history-tooltip-time">${escapeHtml(new Date(nearest.time).toLocaleString())}</div>${rows}`;
+  tooltip.hidden = false;
+  const wrap = canvas.parentElement.getBoundingClientRect();
+  const offsetX = event.clientX - wrap.left + 14;
+  const offsetY = event.clientY - wrap.top + 14;
+  tooltip.style.left = `${Math.min(offsetX, wrap.width - tooltip.offsetWidth - 8)}px`;
+  tooltip.style.top = `${Math.min(offsetY, wrap.height - tooltip.offsetHeight - 8)}px`;
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+canvas.addEventListener('mousemove', showTooltip);
+canvas.addEventListener('mouseleave', hideTooltip);
+canvas.addEventListener('touchstart', event => {
+  const touch = event.touches && event.touches[0];
+  if (touch) showTooltip(touch);
+}, {passive:true});
+
+if (filterForm) {
+  filterForm.addEventListener('submit', () => {
+    writeHistoryPrefs(currentHistoryPrefs());
+  });
+  filterForm.querySelectorAll('select[name="sensor"], input[name="start"], input[name="end"], input[name="duplicates"]').forEach(control => {
+    control.addEventListener('change', () => {
+      if (control.matches('input[name="start"], input[name="end"]')) {
+        quickRangeInput.value = '';
+        quickRangeButtons.forEach(button => button.classList.remove('active'));
+      }
+      writeHistoryPrefs(currentHistoryPrefs());
+    });
+  });
+}
+if (resetLink) {
+  resetLink.addEventListener('click', () => clearHistoryPrefs());
+}
+historySections.forEach(section => {
+  section.addEventListener('toggle', () => {
+    const prefs = readHistoryPrefs() || {};
+    writeHistoryPrefs({...prefs, ...filterPrefsFromForm(), series: [...selector.selectedOptions].map(option => option.value), sections: sectionPrefsFromPage()});
+    if (section.dataset.historySection === 'graph' && section.open) requestAnimationFrame(draw);
+  });
+});
+selector.addEventListener('change', () => {
+  writeHistoryPrefs(currentHistoryPrefs());
+  draw();
+});
+window.addEventListener('resize',draw);
+if (explicitHistoryQueryPresent()) {
+  const previous = readHistoryPrefs() || {};
+  writeHistoryPrefs({...filterPrefsFromForm(), series: previous.series || [], sections: previous.sections || sectionPrefsFromPage()});
+}
+if(selector.options.length)draw();else empty.hidden=false;
 </script>
 {% endblock %}
