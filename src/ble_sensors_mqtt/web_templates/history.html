@@ -42,15 +42,21 @@
 <details class="panel history-collapsible history-section" data-history-section="series">
   <summary><span><span class="eyebrow dark">SERIES</span><strong>Series</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
   <div class="history-section-body">
-    <div class="chart-toolbar"><label>Selected sensor values <select id="series-selector" multiple size="6"></select></label><small>Select multiple series to compare sensors in the graph and values in the table.</small></div>
+    <p class="history-section-intro">Select the sensor values to display. The same selection controls both graphs and the values shown in the historical table.</p>
+    <div id="series-checklist" class="history-series-checklist" role="group" aria-label="Selected sensor values"></div>
+    <div id="series-empty" class="empty-state" hidden>No numeric or boolean series are available in the selected interval.</div>
   </div>
 </details>
 
 <details class="panel history-collapsible history-section" data-history-section="graph" open>
-  <summary><span><span class="eyebrow dark">GRAPH</span><strong>Selected sensor values</strong></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
+  <summary><span><span class="eyebrow dark">GRAPH</span><strong>Selected sensor values</strong></span><span class="history-section-meta" id="graph-summary-meta"></span><span class="history-section-chevron" aria-hidden="true">⌄</span></summary>
   <div class="history-section-body">
-    <div class="history-chart-wrap"><canvas id="history-chart" width="1200" height="430"></canvas><div id="history-chart-tooltip" class="history-chart-tooltip" hidden></div></div>
-    <div id="chart-empty" class="empty-state" hidden>No numeric or boolean series are available in the selected interval.</div>
+    <div id="history-graphs" class="history-graphs"></div>
+    <div id="chart-empty" class="empty-state" hidden>No selected numeric or boolean series are available in the selected interval.</div>
+    <div class="history-graph-footer">
+      <div id="graph-pagination" class="history-pagination" aria-label="Graph pagination"></div>
+      <label class="history-page-size"><span>Graphs per page</span><select id="graphs-per-page"><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></label>
+    </div>
   </div>
 </details>
 
@@ -59,7 +65,7 @@
   <div class="history-section-body">
     <p>{% if deduplicate %}Consecutive samples with identical values and identical stale flag are omitted.{% else %}All samples are displayed.{% endif %}</p>
     <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Recorded</th><th>Sensor</th><th>Stale</th><th>Values</th></tr></thead><tbody>
-    {% for row in rows %}<tr><td>{{ row.recorded_at }}</td><td><strong>{{ row.name }}</strong><small>{{ row.sensor_id }}</small></td><td><span class="status-chip {{ 'degraded' if row.stale else 'online' }}">{{ 'Stale' if row.stale else 'Live' }}</span></td><td><div class="history-values">{% for value in row['values'] %}<span><b>{{ value.path[5:] if value.path.startswith('data.') else value.path }}</b> {{ value.value }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No historical samples in the selected interval.</td></tr>{% endfor %}
+    {% for row in rows %}<tr data-history-row data-sensor-id="{{ row.sensor_id }}"><td>{{ row.recorded_at }}</td><td><strong>{{ row.name }}</strong><small>{{ row.sensor_id }}</small></td><td><span class="status-chip {{ 'degraded' if row.stale else 'online' }}">{{ 'Stale' if row.stale else 'Live' }}</span></td><td><div class="history-values">{% for value in row['values'] %}<span data-history-value data-value-path="{{ value.path }}"><b>{{ value.path[5:] if value.path.startswith('data.') else value.path }}</b> {{ value.value }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="4" class="empty-state">No historical samples in the selected interval.</td></tr>{% endfor %}
     </tbody></table></div>
   </div>
 </details>
@@ -166,14 +172,27 @@ if (!explicitHistoryQueryPresent() && savedHistoryPrefs) {
 }
 
 const historyRows = {{ rows|tojson }};
-const canvas = document.querySelector('#history-chart');
-const selector = document.querySelector('#series-selector');
-const empty = document.querySelector('#chart-empty');
-const tooltip = document.querySelector('#history-chart-tooltip');
-let renderedPoints = [];
-const palette = ['#4dd4ac','#63a8ff','#ffb55c','#d58cff','#ff7088','#7ed957','#ffd166','#7bdff2'];
-function numeric(v) { if (typeof v === 'boolean') return v ? 1 : 0; if (typeof v === 'number' && Number.isFinite(v)) return v; return null; }
-const series = new Map();
+const checklist = document.querySelector('#series-checklist');
+const seriesEmpty = document.querySelector('#series-empty');
+const graphsContainer = document.querySelector('#history-graphs');
+const chartEmpty = document.querySelector('#chart-empty');
+const pagination = document.querySelector('#graph-pagination');
+const graphsPerPageSelect = document.querySelector('#graphs-per-page');
+const graphSummaryMeta = document.querySelector('#graph-summary-meta');
+const palette = ['#4dd4ac','#63a8ff','#ffb55c','#d58cff','#ff7088','#7ed957','#ffd166','#7bdff2','#f59e0b','#14b8a6','#8b5cf6','#ef4444'];
+const chartStates = new Map();
+let graphPage = Math.max(1, Number((savedHistoryPrefs && savedHistoryPrefs.graphPage) || 1));
+let graphsPerPage = [10,20,50].includes(Number(savedHistoryPrefs && savedHistoryPrefs.graphsPerPage)) ? Number(savedHistoryPrefs.graphsPerPage) : 10;
+graphsPerPageSelect.value = String(graphsPerPage);
+
+function numeric(value) {
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+}
+function normalizeMetric(value) {
+  return String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9%°]+/g, '_').replace(/^_|_$/g, '');
+}
 function sensorLabel(row) {
   const name = String(row.name || '').trim();
   const sensorId = String(row.sensor_id || '').trim();
@@ -183,104 +202,247 @@ function valueLabel(path) {
   const text = String(path || '');
   return text.startsWith('data.') ? text.slice(5) : text;
 }
-historyRows.forEach(row => (row.values || []).forEach(item => { const value=numeric(item.value); if(value===null)return; const key=`${sensorLabel(row)} · ${valueLabel(item.path)}`; if(!series.has(key))series.set(key,[]); series.get(key).push({t:new Date(row.recorded_at).getTime(),v:value,stale:row.stale,name:row.name}); }));
-const preferredSeries = new Set((savedHistoryPrefs && savedHistoryPrefs.series) || []);
-[...series.keys()].sort().forEach((key,index) => {
-  const option=document.createElement('option');
-  option.value=key;
-  option.textContent=key;
-  option.selected=preferredSeries.size ? preferredSeries.has(key) : index<Math.min(4,series.size);
-  selector.appendChild(option);
+function prettyMetric(path) {
+  return valueLabel(path).replace(/[_.]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+function unitForRow(row, path) {
+  const units = row && row.data && row.data.units;
+  if (!units || typeof units !== 'object') return '';
+  const cleanPath = valueLabel(path);
+  const leaf = cleanPath.split('.').pop();
+  const candidates = [path, cleanPath, leaf];
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(units, key) && units[key] !== null) return String(units[key]).trim();
+  }
+  return '';
+}
+function normalizeUnit(unit) {
+  const raw = String(unit || '').trim();
+  const lower = raw.toLowerCase().replace(/\s+/g, '');
+  if (['c','°c','celsius','degc'].includes(lower)) return '°C';
+  if (['f','°f','fahrenheit','degf'].includes(lower)) return '°F';
+  if (['%','percent','percentage'].includes(lower)) return '%';
+  if (['ppm'].includes(lower)) return 'ppm';
+  if (['pa','hpa','kpa','bar','mbar'].includes(lower)) return raw;
+  if (['dbm'].includes(lower)) return 'dBm';
+  return raw;
+}
+function groupDescriptor(path, unit) {
+  const label = valueLabel(path);
+  const normalized = normalizeMetric(label);
+  const leaf = normalizeMetric(label.split('.').pop());
+  const u = normalizeUnit(unit);
+  const isTemperature = /(^|_)(temperature|temp)(_|$)/.test(normalized) || ['temperature','temp','temperature_c','temperature_f','temperature_celsius','temperature_fahrenheit'].includes(leaf);
+  if (isTemperature) {
+    if (u === '°F' || /(_f|fahrenheit)$/.test(normalized)) return {key:'temperature-f', title:'Temperature in °F', unit:'°F'};
+    return {key:'temperature-c', title:'Temperature in °C', unit:u || '°C'};
+  }
+  if (/(^|_)(battery|battery_level|battery_percent)(_|$)/.test(normalized) || leaf.startsWith('battery')) return {key:'battery-level', title:'Battery level', unit:u || '%'};
+  if (/(^|_)(humidity|relative_humidity|humidity_percent)(_|$)/.test(normalized) || leaf.includes('humidity')) return {key:'humidity', title:'Humidity', unit:u || '%'};
+  if (/(^|_)(presence|occupancy|motion|moving|detected|human_presence)(_|$)/.test(normalized)) return {key:'presence-occupancy', title:'Presence / occupancy', unit:''};
+  if (leaf === 'rssi' || normalized.includes('rssi')) return {key:'rssi', title:'Signal strength (RSSI)', unit:u || 'dBm'};
+  if (normalized.includes('pressure')) return {key:`pressure-${u || 'value'}`, title:u ? `Pressure in ${u}` : 'Pressure', unit:u};
+  if (/(^|_)co2(_|$)/.test(normalized) || normalized.includes('carbon_dioxide')) return {key:`co2-${u || 'ppm'}`, title:'CO₂ level', unit:u || 'ppm'};
+  if (/(^|_)(illuminance|light|lux)(_|$)/.test(normalized)) return {key:`illuminance-${u || 'lux'}`, title:'Illuminance', unit:u || 'lux'};
+  if (/(^|_)(voc|tvoc)(_|$)/.test(normalized)) return {key:`voc-${u || 'value'}`, title:'VOC level', unit:u};
+  const base = prettyMetric(label);
+  return {key:`custom-${normalizeMetric(label)}-${normalizeMetric(u || 'value')}`, title:u ? `${base} in ${u}` : base, unit:u};
+}
+
+const series = new Map();
+historyRows.forEach(row => {
+  (row.values || []).forEach(item => {
+    const value = numeric(item.value);
+    if (value === null) return;
+    const path = String(item.path || '');
+    const unit = unitForRow(row, path);
+    const descriptor = groupDescriptor(path, unit);
+    const key = `${row.sensor_id}::${path}`;
+    if (!series.has(key)) {
+      series.set(key, {
+        key,
+        sensorId: String(row.sensor_id),
+        sensorName: sensorLabel(row),
+        path,
+        label: `${sensorLabel(row)} · ${valueLabel(path)}`,
+        groupKey: descriptor.key,
+        groupTitle: descriptor.title,
+        unit: descriptor.unit,
+        points: [],
+      });
+    }
+    series.get(key).points.push({t:new Date(row.recorded_at).getTime(), v:value, stale:!!row.stale});
+  });
 });
-if (selector.options.length && selector.selectedOptions.length === 0) {
-  [...selector.options].slice(0, Math.min(4, selector.options.length)).forEach(option => { option.selected = true; });
+
+const preferredSeries = new Set((savedHistoryPrefs && savedHistoryPrefs.series) || []);
+const sortedSeries = [...series.values()].sort((a,b) => a.groupTitle.localeCompare(b.groupTitle) || a.label.localeCompare(b.label));
+sortedSeries.forEach((item,index) => {
+  const label = document.createElement('label');
+  label.className = 'history-series-option';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.value = item.key;
+  input.dataset.seriesKey = item.key;
+  input.checked = preferredSeries.size ? preferredSeries.has(item.key) : index < Math.min(4, sortedSeries.length);
+  const copy = document.createElement('span');
+  copy.innerHTML = `<strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.groupTitle)}${item.unit ? ` · ${escapeHtml(item.unit)}` : ''}</small>`;
+  label.append(input, copy);
+  checklist.appendChild(label);
+});
+if (sortedSeries.length && !checklist.querySelector('input[data-series-key]:checked')) {
+  [...checklist.querySelectorAll('input[data-series-key]')].slice(0, Math.min(4, sortedSeries.length)).forEach(input => { input.checked = true; });
+}
+if (!sortedSeries.length) seriesEmpty.hidden = false;
+
+function selectedSeriesKeys() {
+  return [...checklist.querySelectorAll('input[data-series-key]:checked')].map(input => input.value);
+}
+function selectedSeriesItems() {
+  const keys = new Set(selectedSeriesKeys());
+  return sortedSeries.filter(item => keys.has(item.key));
 }
 function currentHistoryPrefs() {
   return {
     ...filterPrefsFromForm(),
-    series: [...selector.selectedOptions].map(option => option.value),
+    series: selectedSeriesKeys(),
+    graphsPerPage,
+    graphPage,
     sections: sectionPrefsFromPage(),
   };
 }
-function draw() {
-  const keys=[...selector.selectedOptions].map(o=>o.value); const groups=keys.map(key=>({key,points:series.get(key)||[]})).filter(x=>x.points.length); const ctx=canvas.getContext('2d'); const ratio=window.devicePixelRatio||1; const cssWidth=canvas.clientWidth||1200; const cssHeight=430; canvas.width=cssWidth*ratio; canvas.height=cssHeight*ratio; ctx.scale(ratio,ratio); ctx.clearRect(0,0,cssWidth,cssHeight);
-  renderedPoints = []; tooltip.hidden = true;
-  if(!groups.length){empty.hidden=false;return;} empty.hidden=true; const all=groups.flatMap(g=>g.points);
-  const pad={l:62,r:22,t:28,b:68}; const w=cssWidth-pad.l-pad.r,h=cssHeight-pad.t-pad.b; let minT=Math.min(...all.map(p=>p.t)),maxT=Math.max(...all.map(p=>p.t)); let minV=Math.min(...all.map(p=>p.v)),maxV=Math.max(...all.map(p=>p.v)); if(minT===maxT){minT-=1000;maxT+=1000;} if(minV===maxV){minV-=1;maxV+=1;}
-  ctx.strokeStyle='rgba(150,170,190,.25)'; ctx.fillStyle='#8190a5'; ctx.font='12px system-ui'; for(let i=0;i<=5;i++){const y=pad.t+h*i/5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();const value=maxV-(maxV-minV)*i/5;ctx.fillText(value.toFixed(2).replace(/\.00$/,''),8,y+4);}
-  groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.strokeStyle=color;ctx.lineWidth=2.3;ctx.beginPath();group.points.forEach((p,i)=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();group.points.forEach(p=>{const x=pad.l+(p.t-minT)/(maxT-minT)*w,y=pad.t+(maxV-p.v)/(maxV-minV)*h;ctx.fillStyle=p.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();renderedPoints.push({x,y,key:group.key,value:p.v,time:p.t,stale:!!p.stale,color});});});
-  ctx.fillStyle='#8190a5';ctx.fillText(new Date(minT).toLocaleString(),pad.l,pad.t+h+30);const endText=new Date(maxT).toLocaleString();ctx.fillText(endText,pad.l+w-ctx.measureText(endText).width,pad.t+h+30);
-  let lx=pad.l,ly=cssHeight-16;groups.forEach((group,index)=>{const color=palette[index%palette.length];ctx.fillStyle=color;ctx.fillRect(lx,ly-8,12,3);ctx.fillStyle='#526174';const label=group.key.length>34?group.key.slice(0,31)+'…':group.key;ctx.fillText(label,lx+17,ly);lx+=ctx.measureText(label).width+46;if(lx>cssWidth-260){lx=pad.l;ly-=18;}});
-}
-
-function hideTooltip() { tooltip.hidden = true; }
-function showTooltip(event) {
-  if (!renderedPoints.length) { hideTooltip(); return; }
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  let nearest = null;
-  let nearestDistance = Infinity;
-  renderedPoints.forEach(point => {
-    const dx = point.x - x;
-    const dy = point.y - y;
-    const distance = Math.hypot(dx, dy);
-    if (distance < nearestDistance) { nearest = point; nearestDistance = distance; }
+function groupedSelectedSeries() {
+  const groups = new Map();
+  selectedSeriesItems().forEach(item => {
+    if (!groups.has(item.groupKey)) groups.set(item.groupKey, {key:item.groupKey,title:item.groupTitle,unit:item.unit,series:[]});
+    groups.get(item.groupKey).series.push(item);
   });
-  if (!nearest || nearestDistance > 16) { hideTooltip(); return; }
-  const sameTime = renderedPoints.filter(point => Math.abs(point.time - nearest.time) <= 1);
-  const rows = sameTime.map(point => `<div class="history-tooltip-row"><span class="history-tooltip-dot" style="background:${point.stale ? '#ff9f43' : point.color}"></span><strong>${escapeHtml(point.key)}</strong><span>${escapeHtml(String(point.value))}${point.stale ? ' · stale' : ''}</span></div>`).join('');
-  tooltip.innerHTML = `<div class="history-tooltip-time">${escapeHtml(new Date(nearest.time).toLocaleString())}</div>${rows}`;
-  tooltip.hidden = false;
-  const wrap = canvas.parentElement.getBoundingClientRect();
-  const offsetX = event.clientX - wrap.left + 14;
-  const offsetY = event.clientY - wrap.top + 14;
-  tooltip.style.left = `${Math.min(offsetX, wrap.width - tooltip.offsetWidth - 8)}px`;
-  tooltip.style.top = `${Math.min(offsetY, wrap.height - tooltip.offsetHeight - 8)}px`;
+  return [...groups.values()].sort((a,b) => a.title.localeCompare(b.title));
+}
+function updateTableSelection() {
+  const selected = new Set(selectedSeriesKeys());
+  document.querySelectorAll('[data-history-row]').forEach(row => {
+    const sensorId = row.dataset.sensorId || '';
+    let visible = 0;
+    row.querySelectorAll('[data-history-value]').forEach(value => {
+      const key = `${sensorId}::${value.dataset.valuePath || ''}`;
+      const show = selected.has(key);
+      value.hidden = !show;
+      if (show) visible += 1;
+    });
+    row.hidden = selected.size > 0 && visible === 0;
+  });
+}
+function drawGroupChart(canvas, group, tooltip) {
+  const ctx = canvas.getContext('2d');
+  const ratio = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 1200;
+  const cssHeight = 340;
+  canvas.width = cssWidth * ratio;
+  canvas.height = cssHeight * ratio;
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+  const all = group.series.flatMap(item => item.points);
+  if (!all.length) return;
+  const pad = {l:62,r:22,t:22,b:62};
+  const w = cssWidth-pad.l-pad.r;
+  const h = cssHeight-pad.t-pad.b;
+  let minT = Math.min(...all.map(point=>point.t));
+  let maxT = Math.max(...all.map(point=>point.t));
+  let minV = Math.min(...all.map(point=>point.v));
+  let maxV = Math.max(...all.map(point=>point.v));
+  if (minT === maxT) { minT -= 1000; maxT += 1000; }
+  if (minV === maxV) { minV -= 1; maxV += 1; }
+  const points = [];
+  ctx.strokeStyle='rgba(150,170,190,.25)'; ctx.fillStyle='#8190a5'; ctx.font='12px system-ui';
+  for(let i=0;i<=5;i++) {
+    const y=pad.t+h*i/5; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+w,y); ctx.stroke();
+    const value=maxV-(maxV-minV)*i/5; const suffix=group.unit ? ` ${group.unit}` : ''; ctx.fillText(`${value.toFixed(2).replace(/\.00$/,'')}${suffix}`,8,y+4);
+  }
+  group.series.forEach((item,index)=>{
+    const color=palette[index%palette.length]; ctx.strokeStyle=color; ctx.lineWidth=2.3; ctx.beginPath();
+    item.points.forEach((point,i)=>{const x=pad.l+(point.t-minT)/(maxT-minT)*w;const y=pad.t+(maxV-point.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
+    item.points.forEach(point=>{const x=pad.l+(point.t-minT)/(maxT-minT)*w;const y=pad.t+(maxV-point.v)/(maxV-minV)*h;ctx.fillStyle=point.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();points.push({x,y,key:item.label,value:point.v,time:point.t,stale:point.stale,color});});
+  });
+  ctx.fillStyle='#8190a5'; ctx.fillText(new Date(minT).toLocaleString(),pad.l,pad.t+h+28); const endText=new Date(maxT).toLocaleString(); ctx.fillText(endText,pad.l+w-ctx.measureText(endText).width,pad.t+h+28);
+  let lx=pad.l, ly=cssHeight-12;
+  group.series.forEach((item,index)=>{const color=palette[index%palette.length];ctx.fillStyle=color;ctx.fillRect(lx,ly-8,12,3);ctx.fillStyle='#526174';const label=item.label.length>34?item.label.slice(0,31)+'…':item.label;ctx.fillText(label,lx+17,ly);lx+=ctx.measureText(label).width+46;if(lx>cssWidth-260){lx=pad.l;ly-=18;}});
+  chartStates.set(canvas,{points,tooltip,unit:group.unit});
+}
+function showChartTooltip(event, canvas) {
+  const state = chartStates.get(canvas);
+  if (!state || !state.points.length) return;
+  const rect=canvas.getBoundingClientRect(); const x=event.clientX-rect.left; const y=event.clientY-rect.top;
+  let nearest=null, distance=Infinity;
+  state.points.forEach(point=>{const d=Math.hypot(point.x-x,point.y-y);if(d<distance){nearest=point;distance=d;}});
+  if(!nearest || distance>16){state.tooltip.hidden=true;return;}
+  const sameTime=state.points.filter(point=>Math.abs(point.time-nearest.time)<=1);
+  state.tooltip.innerHTML=`<div class="history-tooltip-time">${escapeHtml(new Date(nearest.time).toLocaleString())}</div>${sameTime.map(point=>`<div class="history-tooltip-row"><span class="history-tooltip-dot" style="background:${point.stale?'#ff9f43':point.color}"></span><strong>${escapeHtml(point.key)}</strong><span>${escapeHtml(String(point.value))}${state.unit ? ` ${escapeHtml(state.unit)}` : ''}${point.stale?' · stale':''}</span></div>`).join('')}`;
+  state.tooltip.hidden=false;
+  const wrap=canvas.parentElement.getBoundingClientRect(); const offsetX=event.clientX-wrap.left+14; const offsetY=event.clientY-wrap.top+14;
+  state.tooltip.style.left=`${Math.min(offsetX,wrap.width-state.tooltip.offsetWidth-8)}px`; state.tooltip.style.top=`${Math.min(offsetY,wrap.height-state.tooltip.offsetHeight-8)}px`;
+}
+function renderPagination(totalPages) {
+  pagination.innerHTML='';
+  if (totalPages <= 1) return;
+  const makeButton=(label,page,disabled=false,active=false)=>{const button=document.createElement('button');button.type='button';button.className=`history-page-button${active?' active':''}`;button.textContent=label;button.disabled=disabled;button.addEventListener('click',()=>{graphPage=page;writeHistoryPrefs(currentHistoryPrefs());renderGraphs();});return button;};
+  pagination.appendChild(makeButton('‹',Math.max(1,graphPage-1),graphPage===1));
+  const windowStart=Math.max(1,Math.min(graphPage-2,totalPages-4)); const windowEnd=Math.min(totalPages,windowStart+4);
+  for(let page=windowStart;page<=windowEnd;page++) pagination.appendChild(makeButton(String(page),page,false,page===graphPage));
+  pagination.appendChild(makeButton('›',Math.min(totalPages,graphPage+1),graphPage===totalPages));
+}
+function renderGraphs() {
+  const groups=groupedSelectedSeries();
+  const totalPages=Math.max(1,Math.ceil(groups.length/graphsPerPage));
+  graphPage=Math.min(Math.max(1,graphPage),totalPages);
+  graphsContainer.innerHTML=''; chartStates.clear();
+  chartEmpty.hidden=groups.length>0;
+  graphSummaryMeta.textContent=groups.length ? `${groups.length} graph${groups.length===1?'':'s'}` : '';
+  const start=(graphPage-1)*graphsPerPage;
+  groups.slice(start,start+graphsPerPage).forEach(group=>{
+    const card=document.createElement('article'); card.className='history-graph-card';
+    const header=document.createElement('div'); header.className='history-graph-heading'; header.innerHTML=`<div><span class="eyebrow dark">SERIES GROUP</span><h3>${escapeHtml(group.title)}</h3></div><span>${group.series.length} series</span>`;
+    const wrap=document.createElement('div'); wrap.className='history-chart-wrap';
+    const canvas=document.createElement('canvas'); canvas.width=1200; canvas.height=340;
+    const tooltip=document.createElement('div'); tooltip.className='history-chart-tooltip'; tooltip.hidden=true;
+    wrap.append(canvas,tooltip); card.append(header,wrap); graphsContainer.appendChild(card);
+    canvas.addEventListener('mousemove',event=>showChartTooltip(event,canvas)); canvas.addEventListener('mouseleave',()=>{tooltip.hidden=true;}); canvas.addEventListener('touchstart',event=>{const touch=event.touches&&event.touches[0];if(touch)showChartTooltip(touch,canvas);},{passive:true});
+    drawGroupChart(canvas,group,tooltip);
+  });
+  renderPagination(totalPages);
+  updateTableSelection();
 }
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 }
-canvas.addEventListener('mousemove', showTooltip);
-canvas.addEventListener('mouseleave', hideTooltip);
-canvas.addEventListener('touchstart', event => {
-  const touch = event.touches && event.touches[0];
-  if (touch) showTooltip(touch);
-}, {passive:true});
 
 if (filterForm) {
-  filterForm.addEventListener('submit', () => {
-    writeHistoryPrefs(currentHistoryPrefs());
-  });
+  filterForm.addEventListener('submit', () => writeHistoryPrefs(currentHistoryPrefs()));
   filterForm.querySelectorAll('select[name="sensor"], input[name="start"], input[name="end"], input[name="duplicates"]').forEach(control => {
     control.addEventListener('change', () => {
-      if (control.matches('input[name="start"], input[name="end"]')) {
-        quickRangeInput.value = '';
-        quickRangeButtons.forEach(button => button.classList.remove('active'));
-      }
+      if (control.matches('input[name="start"], input[name="end"]')) { quickRangeInput.value=''; quickRangeButtons.forEach(button=>button.classList.remove('active')); }
       writeHistoryPrefs(currentHistoryPrefs());
     });
   });
 }
-if (resetLink) {
-  resetLink.addEventListener('click', () => clearHistoryPrefs());
-}
+if (resetLink) resetLink.addEventListener('click', () => clearHistoryPrefs());
 historySections.forEach(section => {
   section.addEventListener('toggle', () => {
-    const prefs = readHistoryPrefs() || {};
-    writeHistoryPrefs({...prefs, ...filterPrefsFromForm(), series: [...selector.selectedOptions].map(option => option.value), sections: sectionPrefsFromPage()});
-    if (section.dataset.historySection === 'graph' && section.open) requestAnimationFrame(draw);
+    const prefs=readHistoryPrefs()||{}; writeHistoryPrefs({...prefs,...filterPrefsFromForm(),series:selectedSeriesKeys(),graphsPerPage,graphPage,sections:sectionPrefsFromPage()});
+    if(section.dataset.historySection==='graph'&&section.open) requestAnimationFrame(renderGraphs);
   });
 });
-selector.addEventListener('change', () => {
-  writeHistoryPrefs(currentHistoryPrefs());
-  draw();
+checklist.addEventListener('change', event => {
+  if (!event.target.matches('input[data-series-key]')) return;
+  graphPage=1; writeHistoryPrefs(currentHistoryPrefs()); renderGraphs();
 });
-window.addEventListener('resize',draw);
+graphsPerPageSelect.addEventListener('change',()=>{graphsPerPage=Number(graphsPerPageSelect.value)||10;graphPage=1;writeHistoryPrefs(currentHistoryPrefs());renderGraphs();});
+window.addEventListener('resize',()=>requestAnimationFrame(renderGraphs));
 if (explicitHistoryQueryPresent()) {
-  const previous = readHistoryPrefs() || {};
-  writeHistoryPrefs({...filterPrefsFromForm(), series: previous.series || [], sections: previous.sections || sectionPrefsFromPage()});
+  const previous=readHistoryPrefs()||{};
+  writeHistoryPrefs({...filterPrefsFromForm(),series:previous.series||selectedSeriesKeys(),graphsPerPage:previous.graphsPerPage||graphsPerPage,graphPage:previous.graphPage||graphPage,sections:previous.sections||sectionPrefsFromPage()});
 }
-if(selector.options.length)draw();else empty.hidden=false;
+renderGraphs();
+
 </script>
 {% endblock %}

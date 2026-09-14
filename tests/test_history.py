@@ -80,7 +80,7 @@ def test_history_template_persists_browser_preferences_in_cookie():
     assert "SameSite=Lax" in template
     assert "filterForm.addEventListener('submit'" in template
     assert "control.addEventListener('change'" in template
-    assert "selector.addEventListener('change'" in template
+    assert "checklist.addEventListener('change'" in template
     assert "clearHistoryPrefs()" in template
     assert "window.location.replace" in template
 
@@ -100,3 +100,21 @@ def test_history_frontend_filters_quick_ranges_by_retention():
     assert '"30m", "label": "30m"' in frontend
     assert '"1y", "label": "1 year"' in frontend
     assert 'item["minutes"] <= retention_days * 1440' in frontend
+
+
+def test_history_template_groups_series_into_paginated_checkbox_charts():
+    template = Path("src/ble_sensors_mqtt/web_templates/history.html").read_text(encoding="utf-8")
+    assert 'id="series-checklist"' in template
+    assert "input.type = 'checkbox'" in template
+    assert 'id="graphs-per-page"' in template
+    assert '<option value="10">10</option>' in template
+    assert '<option value="20">20</option>' in template
+    assert '<option value="50">50</option>' in template
+    assert "title:'Temperature in °C'" in template
+    assert "title:'Temperature in °F'" in template
+    assert "title:'Battery level'" in template
+    assert 'groupedSelectedSeries' in template
+    assert 'renderPagination' in template
+    assert 'graphsPerPage' in template
+    assert 'graphPage' in template
+    assert 'data-history-value' in template
