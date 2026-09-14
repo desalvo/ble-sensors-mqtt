@@ -311,7 +311,7 @@ See `docs/DOCKER.en.md` and `docs/KUBERNETES.en.md`. MQTT is outbound; Prometheu
 | `--plugin NAME` | all installed | Restrict plugins; repeatable |
 | `--cloud-help` | off | Show Tuya setup instructions |
 | `--cloud-config FILE` | none | Protected TOML configuration |
-| `--scan-duration S` | 8 | BLE scan duration |
+| `--scan-duration S` | 10 | BLE scan duration |
 | `--bluetooth-adapter ADAPTER` | OS default | Linux BlueZ controller (e.g. `hci1`) |
 | `--poll-interval S` | 30 | Poll interval, 1–86400 seconds |
 | `--plugin-timeout S` | 15 | Maximum decoder/cloud call duration |

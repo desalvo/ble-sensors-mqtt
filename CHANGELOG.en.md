@@ -10,6 +10,7 @@
 - Added first-class presence/motion/occupancy/moving support: common vendor aliases, Home Assistant binary sensors, dedicated Prometheus gauges, and SNMP common-table columns.
 
 ## 1.0.0 - 2026-09-12
+- Dashboard now shows how long each sensor has been stale and the measured average idle time between polling cycles, with sufficient/tight/insufficient headroom status. Default BLE scan duration is now 10 seconds and missing-sensor acquisition attempts per polling cycle default to 3.
 
 - Extended host support to Linux x86_64/arm64 across Debian and Red Hat families, internal/USB Bluetooth with Linux adapter selection, Windows 11+, macOS Tahoe 26+, and tag-triggered native CI bundles.
 
@@ -66,3 +67,5 @@
 - Fixed BLE polling so multiple advertisements from the same device in one scan window are decoded in order and the latest successful reading is exported, preventing temperature/other values from appearing frozen between cycles.
 
 - Fixed BLE polling so multiple advertisements from the same device in one scan window are decoded in order and the latest successful reading is exported, preventing temperature/other values from appearing frozen between cycles.
+
+- Dashboard sensor cards now keep additional values in a collapsed-by-default section.

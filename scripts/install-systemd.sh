@@ -27,10 +27,10 @@ Usage: sudo scripts/install-systemd.sh [options]
   --mqtt-cache-path FILE           default /var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3
   --mqtt-cache-max-size SIZE       default 1GiB
   --reuse-stale-data               reuse previous readings when a sensor is missing
-  --sensor-retry-attempts N        BLE acquisition attempts per polling cycle; default 10
+  --sensor-retry-attempts N        BLE acquisition attempts per polling cycle; default 3
   --sensor-stale-cycles N          missing cycles before reused data becomes stale; default 10
   --poll-interval SEC              default 30
-  --scan-duration SEC              default 8
+  --scan-duration SEC              default 10
   --bluetooth-adapter ADAPTER      Linux BlueZ adapter, e.g. hci1
   --device ID                      repeatable
   --device-name MAC=NAME           repeatable
@@ -115,10 +115,10 @@ mqtt_cache=true
 mqtt_cache_path='/var/lib/ble-sensors-mqtt/mqtt-cache.sqlite3'
 mqtt_cache_max_size='1GiB'
 reuse_stale_data=false
-sensor_retry_attempts=10
+sensor_retry_attempts=3
 sensor_stale_cycles=10
 poll_interval=30
-scan_duration=8
+scan_duration=10
 bluetooth_adapter=''
 home_assistant_discovery=false
 home_assistant_discovery_prefix='homeassistant'

@@ -2,6 +2,7 @@ import argparse
 import json
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -264,7 +265,8 @@ def test_stale_reuse_cli_and_payload_behavior():
 
 def test_sensor_retry_and_stale_defaults():
     args = parser().parse_args(["--mqtt-host", "127.0.0.1"])
-    assert args.sensor_retry_attempts == 10
+    assert args.sensor_retry_attempts == 3
+    assert args.scan_duration == 10.0
     assert args.sensor_stale_cycles == 10
 
 def test_mqtt_cache_is_bounded_fifo_and_private(tmp_path):
@@ -330,3 +332,74 @@ def test_linux_adapter_is_forwarded_to_bleak(monkeypatch):
     import asyncio
     assert asyncio.run(scanner_module.scan(0.001, [Plugin()], adapter="hci1")) == []
     assert captured["bluez"] == {"adapter": "hci1"}
+
+
+def test_sensor_store_exposes_polling_idle_margin():
+    from ble_sensors_mqtt.metrics import SensorStore
+
+    store = SensorStore()
+    store.record_cycle_timing(20.0, 10.0, 30.0)
+    store.record_cycle_timing(21.0, 9.0, 30.0)
+    health = store.health()
+    assert health["average_idle_seconds"] == 9.5
+    assert health["poll_interval_seconds"] == 30.0
+    assert health["polling_margin_status"] == "sufficient"
+
+    tight = SensorStore()
+    tight.record_cycle_timing(28.0, 2.0, 30.0)
+    assert tight.health()["polling_margin_status"] == "tight"
+
+    insufficient = SensorStore()
+    insufficient.record_cycle_timing(31.0, 0.0, 30.0)
+    assert insufficient.health()["polling_margin_status"] == "insufficient"
+
+
+
+def test_sensor_store_exposes_average_internal_retries():
+    from ble_sensors_mqtt.metrics import SensorStore
+
+    store = SensorStore()
+    store.record_internal_retries(0, 2)
+    store.record_internal_retries(1, 2)
+    health = store.health()
+    assert health["average_internal_retries"] == 0.5
+    assert health["max_internal_retries"] == 2
+    assert health["internal_retry_status"] == "tight"
+
+    low = SensorStore()
+    low.record_internal_retries(0, 2)
+    assert low.health()["internal_retry_status"] == "sufficient"
+
+    high = SensorStore()
+    high.record_internal_retries(2, 2)
+    assert high.health()["internal_retry_status"] == "insufficient"
+
+def test_stale_fallback_records_stale_since_and_clears_it_on_fresh_data():
+    from ble_sensors_mqtt.cli import apply_stale_fallback
+
+    previous = {"AA": {"data": {"temperature": 21.0}, "observed_at": "2026-09-13T00:00:00+00:00", "stale": False}}
+    counters = {}
+    current = apply_stale_fallback({}, previous, True, counters, 2)
+    assert current["AA"]["stale"] is False
+    assert "stale_since" not in current["AA"]
+    current = apply_stale_fallback({}, current, True, counters, 2)
+    assert current["AA"]["stale"] is True
+    assert current["AA"]["stale_since"]
+    stale_since = current["AA"]["stale_since"]
+    current = apply_stale_fallback({}, current, True, counters, 2)
+    assert current["AA"]["stale_since"] == stale_since
+    fresh = apply_stale_fallback({"AA": {"data": {"temperature": 22.0}}}, current, True, counters, 2)
+    assert fresh["AA"]["stale"] is False
+    assert "stale_since" not in fresh["AA"]
+
+
+def test_dashboard_shows_stale_duration_and_polling_margin():
+    template = Path("src/ble_sensors_mqtt/web_templates/dashboard.html").read_text(encoding="utf-8")
+    assert "stale_since" in template
+    assert "average_idle_seconds" in template
+    assert "polling_margin_status" in template
+    assert "Insufficient polling interval" in template
+    assert "polling-idle-seconds" in template
+    assert "average_internal_retries" in template
+    assert "internal_retry_status" in template
+    assert "Average retries" in template

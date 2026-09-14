@@ -248,7 +248,7 @@ def default_config() -> dict[str, Any]:
     return {
         "bluetooth": {
             "adapter": "",
-            "scan_duration": 8.0,
+            "scan_duration": 10.0,
             "poll_interval": 30.0,
             "plugin_timeout": 15.0,
             "plugins": [],
@@ -258,7 +258,7 @@ def default_config() -> dict[str, Any]:
         },
         "runtime": {
             "reuse_stale_data": False,
-            "sensor_retry_attempts": 10,
+            "sensor_retry_attempts": 3,
             "sensor_stale_cycles": 10,
             "state_file": "",
             "log_level": "INFO",

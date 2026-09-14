@@ -55,7 +55,10 @@
     <div id="chart-empty" class="empty-state" hidden>No selected numeric or boolean series are available in the selected interval.</div>
     <div class="history-graph-footer">
       <div id="graph-pagination" class="history-pagination" aria-label="Graph pagination"></div>
-      <label class="history-page-size"><span>Graphs per page</span><select id="graphs-per-page"><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></label>
+      <div class="history-graph-options">
+        <label class="history-zero-axis"><input type="checkbox" id="graph-zero-min"><span>Y axis starts at zero</span><small>Disable vertical auto-zoom by forcing the minimum to 0.</small></label>
+        <label class="history-page-size"><span>Graphs per page</span><select id="graphs-per-page"><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></label>
+      </div>
     </div>
   </div>
 </details>
@@ -179,11 +182,14 @@ const chartEmpty = document.querySelector('#chart-empty');
 const pagination = document.querySelector('#graph-pagination');
 const graphsPerPageSelect = document.querySelector('#graphs-per-page');
 const graphSummaryMeta = document.querySelector('#graph-summary-meta');
+const graphZeroMinInput = document.querySelector('#graph-zero-min');
 const palette = ['#4dd4ac','#63a8ff','#ffb55c','#d58cff','#ff7088','#7ed957','#ffd166','#7bdff2','#f59e0b','#14b8a6','#8b5cf6','#ef4444'];
 const chartStates = new Map();
 let graphPage = Math.max(1, Number((savedHistoryPrefs && savedHistoryPrefs.graphPage) || 1));
 let graphsPerPage = [10,20,50].includes(Number(savedHistoryPrefs && savedHistoryPrefs.graphsPerPage)) ? Number(savedHistoryPrefs.graphsPerPage) : 10;
+let graphZeroMin = !!(savedHistoryPrefs && savedHistoryPrefs.graphZeroMin);
 graphsPerPageSelect.value = String(graphsPerPage);
+graphZeroMinInput.checked = graphZeroMin;
 
 function numeric(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
@@ -308,6 +314,7 @@ function currentHistoryPrefs() {
     series: selectedSeriesKeys(),
     graphsPerPage,
     graphPage,
+    graphZeroMin,
     sections: sectionPrefsFromPage(),
   };
 }
@@ -333,6 +340,26 @@ function updateTableSelection() {
     row.hidden = selected.size > 0 && visible === 0;
   });
 }
+function isPercentGroup(group) {
+  return normalizeUnit(group.unit) === '%' || ['battery-level','humidity'].includes(group.key);
+}
+function smoothPath(ctx, coordinates) {
+  if (!coordinates.length) return;
+  ctx.moveTo(coordinates[0].x, coordinates[0].y);
+  if (coordinates.length === 1) return;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const current = coordinates[i];
+    const next = coordinates[i + 1];
+    const previous = coordinates[i - 1] || current;
+    const after = coordinates[i + 2] || next;
+    const tension = 0.22;
+    const cp1x = current.x + (next.x - previous.x) * tension;
+    const cp1y = current.y + (next.y - previous.y) * tension;
+    const cp2x = next.x - (after.x - current.x) * tension;
+    const cp2y = next.y - (after.y - current.y) * tension;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, next.x, next.y);
+  }
+}
 function drawGroupChart(canvas, group, tooltip) {
   const ctx = canvas.getContext('2d');
   const ratio = window.devicePixelRatio || 1;
@@ -352,7 +379,13 @@ function drawGroupChart(canvas, group, tooltip) {
   let minV = Math.min(...all.map(point=>point.v));
   let maxV = Math.max(...all.map(point=>point.v));
   if (minT === maxT) { minT -= 1000; maxT += 1000; }
-  if (minV === maxV) { minV -= 1; maxV += 1; }
+  const percentScale = isPercentGroup(group);
+  if (graphZeroMin) minV = 0;
+  if (percentScale) maxV = 100;
+  if (minV === maxV) {
+    if (graphZeroMin || percentScale) maxV = minV + 1;
+    else { minV -= 1; maxV += 1; }
+  }
   const points = [];
   ctx.strokeStyle='rgba(150,170,190,.25)'; ctx.fillStyle='#8190a5'; ctx.font='12px system-ui';
   for(let i=0;i<=5;i++) {
@@ -360,9 +393,12 @@ function drawGroupChart(canvas, group, tooltip) {
     const value=maxV-(maxV-minV)*i/5; const suffix=group.unit ? ` ${group.unit}` : ''; ctx.fillText(`${value.toFixed(2).replace(/\.00$/,'')}${suffix}`,8,y+4);
   }
   group.series.forEach((item,index)=>{
-    const color=palette[index%palette.length]; ctx.strokeStyle=color; ctx.lineWidth=2.3; ctx.beginPath();
-    item.points.forEach((point,i)=>{const x=pad.l+(point.t-minT)/(maxT-minT)*w;const y=pad.t+(maxV-point.v)/(maxV-minV)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke();
-    item.points.forEach(point=>{const x=pad.l+(point.t-minT)/(maxT-minT)*w;const y=pad.t+(maxV-point.v)/(maxV-minV)*h;ctx.fillStyle=point.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();points.push({x,y,key:item.label,value:point.v,time:point.t,stale:point.stale,color});});
+    const color=palette[index%palette.length];
+    const ordered=[...item.points].sort((a,b)=>a.t-b.t);
+    const coordinates=ordered.map(point=>({point,x:pad.l+(point.t-minT)/(maxT-minT)*w,y:pad.t+(maxV-point.v)/(maxV-minV)*h}));
+    ctx.strokeStyle=color; ctx.lineWidth=2.3; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.beginPath();
+    smoothPath(ctx,coordinates); ctx.stroke();
+    coordinates.forEach(({point,x,y})=>{ctx.fillStyle=point.stale?'#ff9f43':color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();points.push({x,y,key:item.label,value:point.v,time:point.t,stale:point.stale,color});});
   });
   ctx.fillStyle='#8190a5'; ctx.fillText(new Date(minT).toLocaleString(),pad.l,pad.t+h+28); const endText=new Date(maxT).toLocaleString(); ctx.fillText(endText,pad.l+w-ctx.measureText(endText).width,pad.t+h+28);
   let lx=pad.l, ly=cssHeight-12;
@@ -437,10 +473,11 @@ checklist.addEventListener('change', event => {
   graphPage=1; writeHistoryPrefs(currentHistoryPrefs()); renderGraphs();
 });
 graphsPerPageSelect.addEventListener('change',()=>{graphsPerPage=Number(graphsPerPageSelect.value)||10;graphPage=1;writeHistoryPrefs(currentHistoryPrefs());renderGraphs();});
+graphZeroMinInput.addEventListener('change',()=>{graphZeroMin=!!graphZeroMinInput.checked;writeHistoryPrefs(currentHistoryPrefs());renderGraphs();});
 window.addEventListener('resize',()=>requestAnimationFrame(renderGraphs));
 if (explicitHistoryQueryPresent()) {
   const previous=readHistoryPrefs()||{};
-  writeHistoryPrefs({...filterPrefsFromForm(),series:previous.series||selectedSeriesKeys(),graphsPerPage:previous.graphsPerPage||graphsPerPage,graphPage:previous.graphPage||graphPage,sections:previous.sections||sectionPrefsFromPage()});
+  writeHistoryPrefs({...filterPrefsFromForm(),series:previous.series||selectedSeriesKeys(),graphsPerPage:previous.graphsPerPage||graphsPerPage,graphPage:previous.graphPage||graphPage,graphZeroMin:Object.prototype.hasOwnProperty.call(previous,'graphZeroMin')?!!previous.graphZeroMin:graphZeroMin,sections:previous.sections||sectionPrefsFromPage()});
 }
 renderGraphs();
 

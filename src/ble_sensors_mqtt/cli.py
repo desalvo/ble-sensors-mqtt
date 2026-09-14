@@ -196,7 +196,7 @@ def parser() -> argparse.ArgumentParser:
         help="name a cloud or multi-channel sensor; repeatable",
     )
     result.add_argument("--cloud-config", type=Path, help="cloud provider TOML configuration")
-    result.add_argument("--scan-duration", type=positive_seconds, default=8.0)
+    result.add_argument("--scan-duration", type=positive_seconds, default=10.0)
     result.add_argument(
         "--bluetooth-adapter", metavar="ADAPTER",
         help="Linux BlueZ adapter name/address (for example hci1); omit for OS default",
@@ -256,8 +256,8 @@ def parser() -> argparse.ArgumentParser:
         help="reuse the previous reading while a sensor is missing; mark it stale only after --sensor-stale-cycles consecutive misses",
     )
     result.add_argument(
-        "--sensor-retry-attempts", type=int, default=10, metavar="N",
-        help="retry missing known BLE sensors up to N acquisition windows inside one polling cycle (default: 10)",
+        "--sensor-retry-attempts", type=int, default=3, metavar="N",
+        help="retry missing known BLE sensors up to N acquisition windows inside one polling cycle (default: 3)",
     )
     result.add_argument(
         "--sensor-stale-cycles", type=int, default=10, metavar="N",
@@ -455,20 +455,29 @@ async def discover_cycle_with_retries(
     enabled: set[str] | None,
     cloud_config: dict[str, Any] | None,
     expected_ble: set[str],
-) -> dict[str, dict[str, Any]]:
-    """Retry missing known BLE sensors within the normal scan-duration budget."""
+) -> tuple[dict[str, dict[str, Any]], int]:
+    """Retry missing known BLE sensors within the normal scan-duration budget.
+
+    Returns the collected devices and the number of additional acquisition windows
+    used after the first attempt.
+    """
     attempts = max(1, int(args.sensor_retry_attempts))
     if not expected_ble or attempts == 1:
-        return await discover_with_plugins(
-            args.scan_duration, enabled, cloud_config, args.plugin_timeout,
-            args.bluetooth_adapter,
+        return (
+            await discover_with_plugins(
+                args.scan_duration, enabled, cloud_config, args.plugin_timeout,
+                args.bluetooth_adapter,
+            ),
+            0,
         )
 
     # Split the configured BLE scan budget across retry windows. Cloud providers are
     # polled only on the first window so retries cannot multiply external API calls.
     window = max(0.2, float(args.scan_duration) / attempts)
     collected: dict[str, dict[str, Any]] = {}
+    attempts_used = 0
     for attempt in range(1, attempts + 1):
+        attempts_used = attempt
         found = await discover_with_plugins(
             window,
             enabled,
@@ -489,7 +498,7 @@ async def discover_cycle_with_retries(
                 attempts,
                 len(missing),
             )
-    return collected
+    return collected, max(0, attempts_used - 1)
 
 
 def topic_part(address: str) -> str:
@@ -548,6 +557,7 @@ def apply_stale_fallback(
         if payload is not None and has_sensor_data(payload):
             normalized = dict(payload)
             normalized["stale"] = False
+            normalized.pop("stale_since", None)
             exported[address] = normalized
             counters.pop(address, None)
             continue
@@ -556,13 +566,21 @@ def apply_stale_fallback(
             if payload is not None:
                 normalized = dict(payload)
                 normalized["stale"] = False
+                normalized.pop("stale_since", None)
                 exported[address] = normalized
             continue
 
         misses = counters.get(address, 0) + 1
         counters[address] = misses
         retained = dict(previous[address])
-        retained["stale"] = misses >= threshold
+        was_stale = bool(retained.get("stale"))
+        is_stale = misses >= threshold
+        retained["stale"] = is_stale
+        if is_stale:
+            if not was_stale or not retained.get("stale_since"):
+                retained["stale_since"] = datetime.now(UTC).isoformat()
+        else:
+            retained.pop("stale_since", None)
         exported[address] = retained
 
     for address in list(counters):
@@ -879,12 +897,13 @@ async def bridge(args: argparse.Namespace) -> int:
                     for address, payload in previous_exported.items()
                     if "cloud" not in str(payload.get("protocol", "")).lower()
                 }
-                devices = apply_device_names(
-                    await discover_cycle_with_retries(
-                        args, enabled, cloud_config, expected_ble
-                    ),
-                    aliases,
+                discovered, internal_retries = await discover_cycle_with_retries(
+                    args, enabled, cloud_config, expected_ble
                 )
+                store.record_internal_retries(
+                    internal_retries, max(0, int(args.sensor_retry_attempts) - 1)
+                )
+                devices = apply_device_names(discovered, aliases)
                 current_exported = {
                     address: payload
                     for address, payload in devices.items()
@@ -897,14 +916,11 @@ async def bridge(args: argparse.Namespace) -> int:
                     missing_sensor_cycles,
                     args.sensor_stale_cycles,
                 )
+                # Keep the exported snapshot, including stale metadata, so stale_since
+                # remains stable across subsequent missing cycles until a fresh reading arrives.
                 previous_exported = {
                     address: dict(payload)
                     for address, payload in exported.items()
-                    if not payload.get("stale")
-                } | {
-                    address: dict(previous_exported[address])
-                    for address, payload in exported.items()
-                    if payload.get("stale") and address in previous_exported
                 }
 
                 store.replace(exported)
@@ -972,9 +988,11 @@ async def bridge(args: argparse.Namespace) -> int:
             except Exception as exc:
                 store.mark_failure(str(exc))
                 LOG.exception("polling cycle failed; retrying at the next interval")
+            cycle_duration = max(0.0, time.monotonic() - started)
+            remaining = max(0.0, args.poll_interval - cycle_duration)
+            store.record_cycle_timing(cycle_duration, remaining, args.poll_interval)
             if args.once:
                 break
-            remaining = max(0.0, args.poll_interval - (time.monotonic() - started))
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=remaining)
     finally:

@@ -320,7 +320,7 @@ Vedere `docs/DOCKER.it.md` e `docs/KUBERNETES.it.md`. MQTT è uscente; Prometheu
 | `--plugin NOME` | tutti installati | Limita plugin; ripetibile |
 | `--cloud-help` | no | Istruzioni Tuya |
 | `--cloud-config FILE` | - | Provider cloud in TOML protetto |
-| `--scan-duration S` | 8 | Durata scansione BLE |
+| `--scan-duration S` | 10 | Durata scansione BLE |
 | `--bluetooth-adapter ADAPTER` | default OS | Controller BlueZ Linux (es. `hci1`) |
 | `--poll-interval S` | 30 | Intervallo cicli (1–86400) |
 | `--plugin-timeout S` | 15 | Timeout massimo decoder/cloud |

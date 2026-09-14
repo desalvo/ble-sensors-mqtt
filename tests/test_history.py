@@ -118,3 +118,19 @@ def test_history_template_groups_series_into_paginated_checkbox_charts():
     assert 'graphsPerPage' in template
     assert 'graphPage' in template
     assert 'data-history-value' in template
+
+
+def test_history_graphs_support_zero_axis_percent_ceiling_and_smoothing():
+    template = Path("src/ble_sensors_mqtt/web_templates/history.html").read_text(encoding="utf-8")
+    assert 'id="graph-zero-min"' in template
+    assert "graphZeroMin" in template
+    assert "if (percentScale) maxV = 100" in template
+    assert "ctx.bezierCurveTo" in template
+
+
+def test_base_template_has_mobile_navigation_drawer():
+    template = Path("src/ble_sensors_mqtt/web_templates/base.html").read_text(encoding="utf-8")
+    assert 'id="mobile-menu-toggle"' in template
+    assert 'id="mobile-navigation"' in template
+    assert 'id="mobile-nav-overlay"' in template
+    assert "mobile-nav-open" in template

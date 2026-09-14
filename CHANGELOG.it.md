@@ -10,6 +10,7 @@
 - Aggiunto supporto di prima classe per presenza/motion/occupancy/moving: alias vendor comuni, binary sensor Home Assistant, gauge Prometheus dedicate e colonne nella tabella SNMP comune.
 
 ## 1.0.0 - 2026-09-12
+- La Dashboard mostra ora da quanto tempo ogni sensore è stale e il tempo medio reale di inattività tra i cicli di polling, con stato di margine sufficiente/limitato/insufficiente. La scansione BLE predefinita è ora 10 secondi e i tentativi di acquisizione per sensore mancante sono 3 per ciclo.
 
 - Esteso il supporto host a Linux x86_64/arm64 sulle famiglie Debian e Red Hat, Bluetooth interno/USB con selezione adattatore Linux, Windows 11+, macOS Tahoe 26+ e bundle nativi generati dalla CI ad ogni tag.
 
@@ -64,3 +65,5 @@
 - Aggiunto storico persistente SQLite con retention predefinita di 30 giorni, grafici multi-sensore, tabelle deduplicate, cancellazione per intervallo/totale, configurazione da impostazioni/CLI e integrazione nel backup/ripristino cifrato.
 
 - Corretto il polling BLE: più advertisement dello stesso dispositivo nella stessa finestra di scansione vengono decodificati in ordine e viene esportata l'ultima lettura valida, evitando che temperatura/altri valori sembrino bloccati tra i cicli.
+
+- Le schede sensore della Dashboard ora mantengono i valori aggiuntivi in una sezione collassabile chiusa per default.

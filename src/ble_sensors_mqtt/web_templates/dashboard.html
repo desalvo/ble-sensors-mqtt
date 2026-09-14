@@ -66,6 +66,8 @@
       <div><strong id="cycles-total">{{ health.cycles_total }}</strong><span>Polling cycles</span></div>
       <div><strong id="cycles-failed">{{ health.cycles_failed }}</strong><span>Failed cycles</span></div>
       <div><strong id="health-state">{{ 'Ready' if health.ready else 'Starting' }}</strong><span>Current state</span></div>
+      <div id="polling-idle-card" class="polling-margin {{ health.polling_margin_status or 'unknown' }}"><strong id="avg-idle">{% if health.average_idle_seconds is not none %}{{ '%.1f'|format(health.average_idle_seconds) }} s{% else %}—{% endif %}</strong><span id="polling-idle-seconds">{% if health.average_idle_seconds is not none %}Average idle: {{ '%.1f'|format(health.average_idle_seconds) }} s{% else %}Average idle: —{% endif %}</span><small id="polling-margin-label">{% if health.polling_margin_status == 'sufficient' %}Sufficient polling margin{% elif health.polling_margin_status == 'tight' %}Tight polling margin{% elif health.polling_margin_status == 'insufficient' %}Insufficient polling interval{% else %}Polling margin unknown{% endif %}</small></div>
+      <div id="internal-retry-card" class="polling-margin {{ health.internal_retry_status or 'unknown' }}"><strong id="avg-internal-retries">{% if health.average_internal_retries is not none %}{{ '%.2f'|format(health.average_internal_retries) }}{% else %}—{% endif %}</strong><span id="internal-retry-value">{% if health.average_internal_retries is not none %}Average retries: {{ '%.2f'|format(health.average_internal_retries) }} / cycle{% else %}Average retries: —{% endif %}</span><small id="internal-retry-label">{% if health.internal_retry_status == 'sufficient' %}Low retry activity{% elif health.internal_retry_status == 'tight' %}Moderate retry activity{% elif health.internal_retry_status == 'insufficient' %}High retry activity{% else %}Retry activity unknown{% endif %}</small></div>
     </div>
   </article>
   <article class="dashboard-art-card" aria-label="BLE Sensors MQTT visual overview">
@@ -144,6 +146,24 @@ function primaryMetrics(sensor) {
 }
 function icon(kind) { return {temperature:'🌡️',humidity:'💧',presence:'●',battery:'▰'}[kind] || '•'; }
 function niceName(key) { return String(key).replace(/[_\.]+/g,' ').replace(/\b\w/g, c => c.toUpperCase()); }
+function elapsedText(iso) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+function staleLabel(sensor) {
+  if (!sensor.stale) return 'Live';
+  const elapsed = elapsedText(sensor.stale_since);
+  return elapsed ? `Stale · ${elapsed}` : 'Stale';
+}
 
 function sensorCard(address, sensor) {
   const primary = primaryMetrics(sensor);
@@ -162,10 +182,13 @@ function sensorCard(address, sensor) {
   return `<article class="sensor-card rich-sensor-card" data-search="${esc(search)}" data-status="${status}">
     <div class="sensor-card-head">
       <div class="sensor-ident"><div class="device-orb">◉</div><div><h3>${esc(name)}</h3><small>${esc(sensor.manufacturer || 'Unknown manufacturer')} · ${esc(sensor.model || sensor.protocol || 'Unknown model')}</small></div></div>
-      <div class="sensor-card-actions"><a class="mini-action" href="/history?sensor=${encodeURIComponent(address)}">History</a><span class="status-chip ${status === 'live' ? 'online' : 'degraded'}"><span class="status-dot"></span>${status === 'live' ? 'Live' : 'Stale'}</span></div>
+      <div class="sensor-card-actions"><a class="mini-action" href="/history?sensor=${encodeURIComponent(address)}">History</a><span class="status-chip ${status === 'live' ? 'online' : 'degraded'}"><span class="status-dot"></span>${esc(staleLabel(sensor))}</span></div>
     </div>
     <div class="primary-readings">${metricsHtml}</div>
-    <div class="secondary-readings">${extraHtml}</div>
+    <details class="sensor-extra-details">
+      <summary><span>Additional data</span><span class="sensor-extra-count">${extra.length}</span><span class="sensor-extra-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="secondary-readings">${extraHtml}</div>
+    </details>
     <div class="sensor-card-meta">
       <span><b>RSSI</b> ${esc(sensor.rssi ?? '—')} dBm</span>
       <span><b>Protocol</b> ${esc(sensor.protocol || '—')}</span>
@@ -216,6 +239,20 @@ function render(obj) {
   document.querySelector('#cycles-total').textContent = health.cycles_total ?? 0;
   document.querySelector('#cycles-failed').textContent = health.cycles_failed ?? 0;
   document.querySelector('#health-state').textContent = health.ready ? 'Ready' : 'Degraded';
+  const idleCard = document.querySelector('#polling-idle-card');
+  const idle = Number(health.average_idle_seconds);
+  const margin = health.polling_margin_status || 'unknown';
+  idleCard.className = `polling-margin ${margin}`;
+  document.querySelector('#avg-idle').textContent = Number.isFinite(idle) ? `${idle.toFixed(1)} s` : '—';
+  document.querySelector('#polling-idle-seconds').textContent = Number.isFinite(idle) ? `Average idle: ${idle.toFixed(1)} s` : 'Average idle: —';
+  document.querySelector('#polling-margin-label').textContent = margin === 'sufficient' ? 'Sufficient polling margin' : margin === 'tight' ? 'Tight polling margin' : margin === 'insufficient' ? 'Insufficient polling interval' : 'Polling margin unknown';
+  const retryCard = document.querySelector('#internal-retry-card');
+  const retries = Number(health.average_internal_retries);
+  const retryStatus = health.internal_retry_status || 'unknown';
+  retryCard.className = `polling-margin ${retryStatus}`;
+  document.querySelector('#avg-internal-retries').textContent = Number.isFinite(retries) ? retries.toFixed(2) : '—';
+  document.querySelector('#internal-retry-value').textContent = Number.isFinite(retries) ? `Average retries: ${retries.toFixed(2)} / cycle` : 'Average retries: —';
+  document.querySelector('#internal-retry-label').textContent = retryStatus === 'sufficient' ? 'Low retry activity' : retryStatus === 'tight' ? 'Moderate retry activity' : retryStatus === 'insufficient' ? 'High retry activity' : 'Retry activity unknown';
   updateKpis(sensors);
   document.querySelector('#sensors').innerHTML = Object.entries(sensors).map(([address,sensor]) => sensorCard(address,sensor)).join('');
   applyFilters();
